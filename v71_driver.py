@@ -276,10 +276,20 @@ class V71Driver:
         step_cmd is the full ADD,... string, e.g.:
             'ADD,ACW,1000.0,1.5,60.0,,0.005'
         """
+        _ERR_DESCRIPTIONS = {
+            1: "command could not be decoded at this time (is a test running?)",
+            2: "step type not supported by this instrument model",
+            3: "numeric value out of allowable range",
+            4: "field syntax error",
+            5: "missing required field",
+            6: "too many fields",
+            7: "unknown command keyword",
+        }
         self.send_command(step_cmd)
         err = self.check_error()
         if err:
-            raise V71Error(f"ADD step failed with error code {err}: {step_cmd}")
+            desc = _ERR_DESCRIPTIONS.get(err, f"error code {err}")
+            raise V71Error(f"ADD step rejected — {desc}. Command: {step_cmd}")
 
     def add_acw_step(self, voltage_v: float, ramp_s: float, dwell_s: float,
                      max_leakage_a: float = 0.005, min_leakage_a: float = None,

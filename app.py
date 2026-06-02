@@ -663,35 +663,42 @@ function fieldHtml(type, idx) {
   return "";
 }
 
+let _stepUid = 0;  // monotonic ID for stable DOM refs — never resets
+
 function addStep() {
   const type = document.getElementById("new-step-type").value;
-  const idx = steps.length;
-  steps.push({ type });
+  const uid  = _stepUid++;
   const list = document.getElementById("steps-list");
-  const div = document.createElement("div");
-  div.className = "step-item";
-  div.id = `step-${idx}`;
+  const div  = document.createElement("div");
+  div.className    = "step-item";
+  div.id           = `step-${uid}`;
+  div.dataset.type = type;
   div.innerHTML = `
-    <button class="del-step" onclick="removeStep(${idx})">✕</button>
-    <h4>Step ${idx + 1}: ${type}</h4>
-    ${fieldHtml(type, idx)}`;
+    <button class="del-step" onclick="removeStep(${uid})">✕</button>
+    <h4></h4>
+    ${fieldHtml(type, uid)}`;
   list.appendChild(div);
+  renumberSteps();
 }
 
-function removeStep(idx) {
-  document.getElementById(`step-${idx}`)?.remove();
-  steps[idx] = null;
+function removeStep(uid) {
+  document.getElementById(`step-${uid}`)?.remove();
+  renumberSteps();
+}
+
+function renumberSteps() {
+  document.querySelectorAll("#steps-list .step-item").forEach((el, i) => {
+    el.querySelector("h4").textContent = `Step ${i + 1}: ${el.dataset.type}`;
+  });
 }
 
 function collectSteps() {
-  const items = document.querySelectorAll(".step-item");
   const out = [];
-  items.forEach(item => {
-    const inputs = item.querySelectorAll("input");
-    const stepObj = { type: item.querySelector("h4").textContent.split(": ")[1] };
-    inputs.forEach(inp => {
+  document.querySelectorAll("#steps-list .step-item").forEach(item => {
+    const stepObj = { type: item.dataset.type };
+    item.querySelectorAll("input").forEach(inp => {
       const key = inp.name.replace(/^steps\[\d+\]\./, "");
-      stepObj[key] = inp.value;
+      if (key) stepObj[key] = inp.value;
     });
     out.push(stepObj);
   });
