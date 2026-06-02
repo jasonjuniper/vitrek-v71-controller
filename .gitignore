@@ -7,3 +7,6 @@ __pycache__/
 .env
 venv/
 .venv/
+
+# Large installer - excluded from git
+software/QT Insite/
