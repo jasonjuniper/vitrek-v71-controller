@@ -325,70 +325,192 @@ def export_session(session_id):
 
 
 # ---------------------------------------------------------------------------
-# Embedded single-file UI
+# Embedded single-file UI (Juniper branded)
 # ---------------------------------------------------------------------------
 HTML_UI = r"""<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>V71 HiPot Controller</title>
+<title>V71 HiPot Controller — Juniper Design</title>
+<link rel="icon" type="image/svg+xml" href="/static/assets/juniper-logo.svg">
+<link rel="stylesheet" href="/static/css/juniper-brand.css">
 <style>
-  :root{--blue:#1F4E79;--blue2:#2E75B6;--green:#375623;--red:#C00000;--bg:#F4F6FA;--card:#fff;--border:#D0D7E3;}
-  *{box-sizing:border-box;margin:0;padding:0;}
-  body{font-family:Calibri,Arial,sans-serif;background:var(--bg);color:#222;}
-  header{background:var(--blue);color:#fff;padding:14px 24px;display:flex;align-items:center;gap:16px;}
-  header h1{font-size:1.3rem;font-weight:700;}
-  #conn-status{font-size:.85rem;padding:3px 10px;border-radius:12px;background:#555;}
-  #conn-status.connected{background:#375623;}
-  .main{display:grid;grid-template-columns:320px 1fr;gap:16px;padding:16px;max-width:1400px;margin:auto;}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px;}
-  .card h2{font-size:1rem;font-weight:700;color:var(--blue);margin-bottom:12px;border-bottom:2px solid var(--blue2);padding-bottom:6px;}
-  label{display:block;font-size:.85rem;font-weight:600;margin-top:8px;margin-bottom:2px;}
-  input,select{width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:.9rem;}
-  button{padding:7px 14px;border:none;border-radius:4px;cursor:pointer;font-size:.9rem;font-weight:600;margin-top:6px;}
-  .btn-primary{background:var(--blue);color:#fff;}
-  .btn-green{background:#4CAF50;color:#fff;}
-  .btn-red{background:var(--red);color:#fff;}
-  .btn-orange{background:#E65100;color:#fff;}
-  .btn-secondary{background:#607D8B;color:#fff;}
-  button:disabled{opacity:.5;cursor:default;}
-  .steps-list{margin-top:8px;}
-  .step-item{background:#EEF2FA;border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;position:relative;}
-  .step-item h4{font-size:.85rem;color:var(--blue2);margin-bottom:6px;}
-  .step-item .del-step{position:absolute;top:6px;right:8px;background:none;border:none;color:var(--red);font-size:1rem;cursor:pointer;padding:0;}
-  .step-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
-  .live-panel{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;}
-  .live-val{background:#EEF2FA;border-radius:6px;padding:10px;text-align:center;}
-  .live-val .label{font-size:.75rem;color:#555;font-weight:600;}
-  .live-val .val{font-size:1.5rem;font-weight:700;color:var(--blue);}
-  #step-progress{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px;}
-  .step-badge{padding:4px 8px;border-radius:4px;font-size:.8rem;font-weight:700;background:#ddd;}
-  .step-badge.P{background:#c6efce;color:#375623;}
-  .step-badge.F{background:#ffc7ce;color:#9C0006;}
-  .step-badge.running{background:#FFEB3B;color:#333;}
-  #results-table{width:100%;border-collapse:collapse;font-size:.85rem;}
-  #results-table th{background:var(--blue2);color:#fff;padding:6px 10px;text-align:left;}
-  #results-table td{padding:5px 10px;border-bottom:1px solid var(--border);}
-  #results-table tr.pass td{background:#e8f5e9;}
-  #results-table tr.fail td{background:#ffebee;}
-  .msg{padding:8px 12px;border-radius:4px;margin-top:8px;font-size:.85rem;}
-  .msg.ok{background:#e8f5e9;color:#1B5E20;}
-  .msg.err{background:#ffebee;color:#B71C1C;}
-  .tag-pass{color:var(--green);font-weight:700;}
-  .tag-fail{color:var(--red);font-weight:700;}
-  select[name=step_type]{margin-bottom:6px;}
-  .right-panel{display:flex;flex-direction:column;gap:16px;}
+  /* ── Layout ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--juniper-font);
+  }
+  .app-main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 330px 1fr;
+    gap: 16px;
+    padding: 16px;
+    max-width: 1440px;
+    margin: 0 auto;
+    width: 100%;
+  }
+  /* ── Cards ── */
+  .card {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    box-shadow: 0 2px 8px var(--shadow);
+  }
+  .card h2 {
+    font-size: .9rem;
+    font-weight: 600;
+    color: var(--primary);
+    margin-bottom: 12px;
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 6px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+  /* ── Forms ── */
+  label { display: block; font-size: .8rem; font-weight: 600; margin-top: 8px; margin-bottom: 2px; color: var(--text-soft); }
+  input, select {
+    width: 100%;
+    padding: 6px 9px;
+    border: 1px solid var(--input-border);
+    border-radius: 5px;
+    font-size: .88rem;
+    background: var(--input-bg);
+    color: var(--text);
+    font-family: var(--juniper-font);
+  }
+  input:focus, select:focus { outline: 2px solid var(--primary); outline-offset: 1px; }
+  /* ── Buttons ── */
+  button {
+    padding: 7px 14px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: .88rem;
+    font-weight: 600;
+    margin-top: 6px;
+    font-family: var(--juniper-font);
+    transition: opacity .15s;
+  }
+  button:disabled { opacity: .45; cursor: default; }
+  .btn-primary  { background: var(--primary);  color: #fff; }
+  .btn-primary:hover:not(:disabled)  { background: var(--primary-hover); }
+  .btn-green    { background: var(--success);  color: #fff; }
+  .btn-green:hover:not(:disabled)    { background: var(--success-hover); }
+  .btn-red      { background: var(--error-fg); color: #fff; }
+  .btn-orange   { background: #c46200;         color: #fff; }
+  .btn-muted    { background: var(--bg-elev-2); color: var(--text-soft); border: 1px solid var(--border); }
+  /* ── Connection status pill ── */
+  #conn-status {
+    font-size: .75rem;
+    font-weight: 600;
+    padding: 3px 11px;
+    border-radius: 12px;
+    background: rgba(255,255,255,.15);
+    color: var(--juniper-offwhite);
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+  #conn-status.connected { background: rgba(46,160,71,.7); }
+  /* ── Step builder ── */
+  .steps-list { margin-top: 8px; }
+  .step-item {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px;
+    margin-bottom: 8px;
+    position: relative;
+  }
+  .step-item h4 { font-size: .82rem; color: var(--primary); margin-bottom: 6px; font-weight: 600; }
+  .step-item .del-step {
+    position: absolute; top: 6px; right: 8px;
+    background: none; border: none; color: var(--error-fg);
+    font-size: 1rem; cursor: pointer; padding: 0;
+  }
+  .step-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  /* ── Live measurements ── */
+  .live-panel { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .live-val {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+  }
+  .live-val .lv-label { font-size: .72rem; color: var(--text-muted); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  .live-val .lv-val   { font-size: 1.4rem; font-weight: 700; color: var(--primary); margin-top: 2px; }
+  /* ── Step badges ── */
+  #step-progress { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+  .step-badge {
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: .78rem;
+    font-weight: 700;
+    background: var(--bg-elev-2);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+  }
+  .step-badge.P { background: #d4edda; color: #155724; border-color: #c3e6cb; }
+  .step-badge.F { background: var(--error-bg); color: var(--error-fg); border-color: var(--error-border); }
+  .step-badge.running { background: var(--warning-bg); color: var(--warning-fg); border-color: var(--warning-border); }
+  /* ── Results table ── */
+  #results-table { width: 100%; border-collapse: collapse; font-size: .83rem; }
+  #results-table th {
+    background: var(--table-head-bg);
+    color: var(--text-soft);
+    padding: 7px 10px;
+    text-align: left;
+    font-weight: 600;
+    font-size: .78rem;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    border-bottom: 2px solid var(--border);
+  }
+  #results-table td { padding: 6px 10px; border-bottom: 1px solid var(--hairline); color: var(--text); }
+  #results-table tr.pass td { background: rgba(46,127,58,.08); }
+  #results-table tr.fail td { background: rgba(218,54,51,.07); }
+  /* ── Feedback messages ── */
+  .msg { padding: 8px 12px; border-radius: 5px; margin-top: 8px; font-size: .83rem; border: 1px solid transparent; }
+  .msg.ok  { background: var(--success-hover); color: #fff; border-color: transparent; }
+  .msg.err { background: var(--error-bg); color: var(--error-fg); border-color: var(--error-border); }
+  .tag-pass { color: var(--success); font-weight: 700; }
+  .tag-fail { color: var(--error-fg); font-weight: 700; }
+  /* ── Misc ── */
+  .right-panel { display: flex; flex-direction: column; gap: 16px; }
+  .left-panel  { display: flex; flex-direction: column; gap: 16px; }
+  .btn-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  #run-status-line { font-size: .83rem; color: var(--text-muted); }
+  .section-export-link { float: right; font-size: .78rem; color: var(--primary); text-decoration: none; }
+  .section-export-link:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
-<header>
-  <h1>⚡ Vitrek V71 HiPot Controller</h1>
-  <span id="conn-status">Disconnected</span>
+
+<!-- Juniper brand bar -->
+<header class="juniper-brand-bar">
+  <div class="juniper-brand-bar-inner">
+    <img class="juniper-logo" src="/static/assets/juniper-logo.svg" alt="Juniper Design">
+    <div style="display:flex;align-items:center;gap:14px;">
+      <span class="juniper-product">V71 HiPot Controller</span>
+      <span id="conn-status">Disconnected</span>
+      <button id="juniper-theme-toggle" class="juniper-theme-toggle" type="button"
+              aria-label="Toggle light/dark theme" title="Toggle theme">
+        <span class="juniper-theme-icon">🌙</span>
+      </button>
+    </div>
+  </div>
 </header>
-<div class="main">
+<main class="app-main">
   <!-- Left panel: connect + sequence builder -->
-  <div style="display:flex;flex-direction:column;gap:16px;">
+  <div class="left-panel">
 
     <div class="card" id="card-connect">
       <h2>Connection</h2>
@@ -409,8 +531,8 @@ HTML_UI = r"""<!DOCTYPE html>
         </select>
       </div>
       <button class="btn-primary" id="btn-connect" onclick="doConnect()">Connect</button>
-      <button class="btn-secondary" id="btn-disconnect" disabled onclick="doDisconnect()">Disconnect</button>
-      <div id="idn-info" style="font-size:.8rem;color:#555;margin-top:8px;"></div>
+      <button class="btn-muted" id="btn-disconnect" disabled onclick="doDisconnect()">Disconnect</button>
+      <div id="idn-info" style="font-size:.8rem;color:var(--text-muted);margin-top:8px;"></div>
     </div>
 
     <div class="card">
@@ -435,9 +557,9 @@ HTML_UI = r"""<!DOCTYPE html>
         <option value="GB">GB — Ground Bond</option>
         <option value="CONT">CONT — Continuity</option>
       </select>
-      <button class="btn-secondary" onclick="addStep()">+ Add Step</button>
+      <button class="btn-muted" onclick="addStep()">+ Add Step</button>
       <div class="steps-list" id="steps-list"></div>
-      <div style="margin-top:10px;display:flex;gap:8px;">
+      <div class="btn-row">
         <button class="btn-green" id="btn-run" disabled onclick="doRun()">▶ Run Test</button>
         <button class="btn-red" id="btn-abort" disabled onclick="doAbort()">■ Abort</button>
         <button class="btn-orange" id="btn-cont" disabled onclick="doCont()">▶▶ Continue</button>
@@ -448,22 +570,23 @@ HTML_UI = r"""<!DOCTYPE html>
 
   <!-- Right panel: live + results -->
   <div class="right-panel">
+
     <div class="card">
       <h2>Live Measurements</h2>
       <div class="live-panel">
-        <div class="live-val"><div class="label">VOLTS (V)</div><div class="val" id="live-volts">—</div></div>
-        <div class="live-val"><div class="label">AMPS (A)</div><div class="val" id="live-amps">—</div></div>
-        <div class="live-val"><div class="label">OHMS (Ω)</div><div class="val" id="live-ohms">—</div></div>
+        <div class="live-val"><div class="lv-label">Volts (V)</div><div class="lv-val" id="live-volts">—</div></div>
+        <div class="live-val"><div class="lv-label">Amps (A)</div><div class="lv-val" id="live-amps">—</div></div>
+        <div class="live-val"><div class="lv-label">Ohms (Ω)</div><div class="lv-val" id="live-ohms">—</div></div>
       </div>
       <div id="step-progress"></div>
-      <div style="font-size:.85rem;color:#555;" id="run-status-line">Not running</div>
+      <div id="run-status-line">Not running</div>
     </div>
 
     <div class="card">
       <h2>Test History
-        <a href="/api/export" style="float:right;font-size:.8rem;color:var(--blue2);">⬇ Export All to Excel</a>
+        <a href="/api/export" class="section-export-link">⬇ Export All to Excel</a>
       </h2>
-      <div id="stats-line" style="font-size:.85rem;margin-bottom:8px;color:#555;"></div>
+      <div id="stats-line" style="font-size:.83rem;margin-bottom:8px;color:var(--text-muted);"></div>
       <table id="results-table">
         <thead>
           <tr>
@@ -475,8 +598,13 @@ HTML_UI = r"""<!DOCTYPE html>
       </table>
     </div>
   </div>
-</div>
+</main>
 
+<footer class="juniper-footer">
+  Designed and built by <a href="https://juniperdesign.com" target="_blank" rel="noopener">Juniper Design</a>
+</footer>
+
+<script src="/static/js/juniper-theme.js"></script>
 <script>
 let steps = [];
 let pollTimer = null;
@@ -695,7 +823,7 @@ async function loadSessions() {
       <td>${row.part_number||"—"} / ${row.serial_number||"—"}</td>
       <td>${row.operator||"—"}</td>
       <td>${tag}</td>
-      <td><a href="/api/export/${row.id}" style="color:var(--blue2);font-size:.8rem;">⬇ xlsx</a></td>`;
+      <td><a href="/api/export/${row.id}" style="color:var(--primary);font-size:.8rem;">⬇ xlsx</a></td>`;
     tbody.appendChild(tr);
   });
 }

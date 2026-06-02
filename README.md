@@ -1,6 +1,10 @@
+<p align="center"><img src="assets/juniper-banner.svg" alt="JUNIPER · Lighting · Power Solutions · Systems" width="900"></p>
+
 # Vitrek V71 HiPot Controller
 
-A Python/Flask web application for controlling the **Vitrek V71 Hi-Pot Tester** over USB (HID-to-UART) or RS-232. Runs test sequences, stores results in a local SQLite database, and exports to Excel for SharePoint sync.
+A Python/Flask web application for controlling the **Vitrek V71 Hi-Pot Tester** over USB (HID-to-UART) or RS-232. Runs test sequences, stores results in a local SQLite database, and exports to Excel for SharePoint sync. Built at [Juniper Design](https://juniperdesign.com).
+
+> 📄 **Print-ready PDF:** [`docs/pdf/README.pdf`](docs/pdf/README.pdf)
 
 ---
 
