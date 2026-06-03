@@ -71,20 +71,32 @@ Check your bench stock before adding these to a cart.
 | 18 | Arduino resistor kit — 100Ω and 10kΩ | — | ✅ | Probably — confirm you have at least 3× 10kΩ (CS pull-ups) and 3× 100Ω (protection resistors). If stock is low, order a 1/4W resistor assortment on Amazon: **"resistor assortment kit 1/4W 600 piece"**. |
 | 19 | 100nF (0.1µF) ceramic capacitors | 3+ | ✅ | Probably — confirm at least 3× 100nF for MAX31855 VCC decoupling. |
 | 20 | SSD1306 128×64 OLED display (I²C) | 1 | ✅ | Check Arduino kit. If not on hand: Amazon **"SSD1306 0.96 inch OLED I2C"** ~$4. |
-| 21 | Raspberry Pi 4B | 1 | ❓ | **Required for GPIO.** The Flask app can run on the NUC for development, but reading MAX31855 via SPI and driving GPIO12/13/18 for SSR and servos requires RPi GPIO. If you don't have one, add a RPi 4B (2GB) to Priority 1 (~$35–45, Adafruit or PiShop — avoid grey-market pricing). The RPi 4B must have SPI enabled (`raspi-config → Interface Options → SPI → Enable`). |
+| 21 | Raspberry Pi 5 4GB | 1 | ❓ | **Required for GPIO.** Flask app runs on any host for dev, but SPI (MAX31855) and GPIO PWM (SSR, servos) need a Pi. See RPi note below. |
 
 ---
 
 ## Note on Raspberry Pi
 
-The thermal controller as designed requires an **RPi 4B** for GPIO access:
-- SPI0 hardware bus (GPIO8/7/25 for CS, GPIO11/9 for CLK/MISO) → reads MAX31855 modules
-- GPIO12 hardware PWM → heater SSR duty cycle control
-- GPIO13, GPIO18 hardware PWM → servo A and servo B vent control
+**Use a Raspberry Pi 5 4GB.** The Pi 4 is heavily inflated on Amazon ($125–150 for a kit). The Pi 5 is faster, more available, and at MSRP costs less.
 
-The **Flask HMI app** (`app.py`) can run on any host (NUC, laptop) during development with the hardware-dependent routes stubbed out. But for full rig operation with live temperature feedback and heater control, you need the RPi on the bench.
+**Cheapest sourcing path (~$78 total):**
 
-If you don't already have a Pi 4B, add it to the Priority 1 order. The 2GB RAM model is sufficient. Adafruit and PiShop.us are the most reliable US retailers; avoid Amazon third-party listings that may be overpriced or grey-market.
+| Item | Source | Price |
+|------|--------|-------|
+| RPi 5 4GB board | PiShop.us or Adafruit ($60 MSRP) | $60 |
+| 27W USB-C PD power supply | Any 27W+ USB-C PD adapter — check your desk first. Official RPi PSU from PiShop ~$12, or generic on Amazon ~$8 | $8–12 |
+| 32GB microSD A2-rated | Amazon: "Samsung EVO Select 32GB microSD" | $8 |
+| Case | None needed for prototype — bare board on bench is fine | $0 |
+
+> If buying a kit, the **Vilros RPi 5 Complete Starter Kit** (vilros.com) is $134.99 on sale and includes board, 128GB SD, 27W PSU, aluminum case, and HDMI cables. Worth it if you want everything in one box — but $55 more than buying parts individually.
+
+**One extra setup step for Pi 5:** the standard `RPi.GPIO` library does not support the Pi 5's GPIO chip. Install the drop-in replacement before running the Flask app:
+```bash
+pip install rpi-lgpio --break-system-packages
+```
+This provides a fully compatible `RPi.GPIO` API on the Pi 5. No code changes required — just install it before `requirements.txt`.
+
+SPI must be enabled: `sudo raspi-config → Interface Options → SPI → Enable → reboot`.
 
 ---
 
@@ -95,10 +107,10 @@ If you don't already have a Pi 4B, add it to the Priority 1 order. The 2GB RAM m
 | Priority 1 — breadboard unblock | ~$25–30 |
 | Priority 2 — heater circuit | ~$35–50 |
 | Priority 3 — servos | ~$12–20 |
-| RPi 4B (if needed) | ~$35–45 |
-| **Total to source** | **~$110–145** |
+| RPi 5 4GB + PSU + SD (if needed) | ~$78 |
+| **Total to source** | **~$150–178** |
 
-Minimum spend to get a breadboard bench test running (Priority 1 only, assuming RPi on hand): **~$25–30**.
+Minimum spend to start breadboarding (Priority 1 only, RPi on hand): **~$25–30**.
 
 ---
 

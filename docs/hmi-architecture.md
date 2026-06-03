@@ -38,9 +38,17 @@ This document describes the recommended hardware layout for the Juniper Automate
 
 ## Device Roles
 
-### Raspberry Pi 4 — Primary Station Computer
+### Raspberry Pi 5 — Primary Station Computer
 
-**Recommended model:** Raspberry Pi 4B, 4 GB RAM, running Raspberry Pi OS Lite (64-bit)
+**Recommended model:** Raspberry Pi 5, 4 GB RAM, running Raspberry Pi OS Lite (64-bit)
+
+> **Pi 4 vs Pi 5:** The Pi 4 is heavily inflated on the secondary market ($125–150 for kits). The Pi 5 is faster, more widely available at MSRP (~$60 board), and fully compatible with this codebase with one extra package install. **Get the Pi 5.**
+>
+> **One setup step unique to Pi 5:** the standard `RPi.GPIO` library doesn't support the Pi 5's RP1 GPIO chip. Install the drop-in shim before `requirements.txt`:
+> ```bash
+> pip install rpi-lgpio --break-system-packages
+> ```
+> No code changes needed — `rpi-lgpio` provides a fully compatible `RPi.GPIO` API on the Pi 5.
 
 The RPi is the central brain of the test station. It runs the Flask web application (`app.py`) and hosts the thermal controller hardware interface. Everything else on the network connects to or reports to the RPi.
 
@@ -71,10 +79,10 @@ The RPi is the central brain of the test station. It runs the Flask web applicat
 
 | Item | Qty | Notes |
 |---|---|---|
-| Raspberry Pi 4B 4GB | 1 | Pi 5 also works; Pi 3B+ is marginal |
-| SD card 32 GB+ Class 10 | 1 | Samsung EVO or better |
-| USB-C 5V/3A power supply | 1 | Official Pi PSU recommended |
-| DIN rail mount case for Pi | 1 | e.g. RasPi DIN mount carrier — keeps it tidy in the enclosure |
+| Raspberry Pi 5 4GB | 1 | ~$60 from PiShop.us or Adafruit at MSRP |
+| SD card 32 GB+ A2-rated | 1 | Samsung EVO Select or SanDisk Extreme — A2 rating matters |
+| USB-C 27W PD power supply | 1 | Pi 5 needs 5V/5A (27W) — not just 3A. Official RPi PSU or any 27W+ USB-C PD adapter |
+| DIN rail mount case for Pi | 1 | Optional — bare board fine for prototype |
 | Ethernet patch cable | 1 | Short run from Pi to switch/router |
 
 ---
