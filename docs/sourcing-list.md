@@ -75,6 +75,14 @@ Check your bench stock before adding these to a cart.
 
 ---
 
+## Note on Raspberry Pi / SBC
+
+**You don't need an SBC at all for the prototype.** The WeMos D1 Mini (ESP8266) already in your kit handles all the hardware I/O — SPI for MAX31855 thermocouples, PWM for the SSR heater and servo vents — and talks to the NUC over WiFi. The NUC runs the Flask app, Modbus TCP to the LOGO! PLC, USB to the HiPot, and TCP to the DC Load. Nothing to buy.
+
+Set `"transport": "http"` in `plc/rig_config.json` (already done) and flash `esp8266/thermal-bridge/` to the D1 Mini.
+
+**If you want an SBC later:** RPi 4B and 5 are available at MSRP ($55–60 for board only) through DigiKey, Mouser, and Arrow — all approved vendors. Check their sites directly; pricing should be at MSRP unlike the Amazon kit bundles. Used RPi units on Facebook Marketplace are also a practical option for a lab device — any Pi 4B or 5 works.
+
 ## Note on Raspberry Pi
 
 **Use a Raspberry Pi 5 4GB.** The Pi 4 is heavily inflated on Amazon ($125–150 for a kit). The Pi 5 is faster, more available, and at MSRP costs less.

@@ -267,7 +267,14 @@ def api_rig_connect():
         try:
             if _thermal:
                 _thermal.shutdown()
-            tc = ThermalController(plc=_plc)
+            _transport = RIG_CONFIG.get("transport", "auto")
+            _esp = RIG_CONFIG.get("esp8266", {})
+            tc = ThermalController(
+                plc=_plc,
+                transport=_transport,
+                esp_host=_esp.get("host", "192.168.1.60"),
+                esp_port=_esp.get("port", 80),
+            )
             tc.init()
             _thermal = tc
         except Exception as e:

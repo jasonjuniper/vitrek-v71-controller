@@ -10,11 +10,22 @@ Manages:
   - LOGO! PLC safety interlocks (via logo_driver.py)
   - PID temperature loop (software, on the HMI host)
 
-Hardware assumes a Raspberry Pi 4 (or equivalent Linux SBC) as the HMI host.
-On Windows (NUC/dev machine), the RPi GPIO calls are stubbed with a mock layer
-so the Flask app can run without hardware attached.
+## Transport modes (set in plc/rig_config.json → "transport")
 
-## Wiring summary (see docs/wiring-guide.md for full detail)
+  "gpio"   Raspberry Pi 4/5 — direct GPIO/SPI. Requires RPi.GPIO, spidev,
+           adafruit-circuitpython-max31855. On RPi 5 also install rpi-lgpio
+           as a drop-in RPi.GPIO shim: pip install rpi-lgpio.
+
+  "http"   WeMos D1 Mini (ESP8266) thermal bridge — no RPi required.
+           Hardware I/O runs on the ESP8266 running esp8266/thermal-bridge/.
+           The NUC runs Flask + Modbus TCP. The bridge exposes a simple HTTP
+           API that this controller calls for sensor reads and actuator commands.
+           Set "esp8266.host" and "esp8266.port" in rig_config.json.
+
+  "mock"   Windows / dev machine — fully stubbed with drifting mock temperatures.
+           Automatically selected if RPi.GPIO is not importable (i.e. on Windows).
+
+## RPi wiring (see docs/wiring-guide.md for full detail)
   SPI0:
     CE0 (GPIO8)  → MAX31855 #1 CS  (TC1 — ambient)
     CE1 (GPIO7)  → MAX31855 #2 CS  (TC2 — DUT surface)
@@ -27,20 +38,29 @@ so the Flask app can run without hardware attached.
     GPIO13  → Servo 1 PWM (vent valve A)
     GPIO18  → Servo 2 PWM (vent valve B)
 
-Dependencies (RPi):
-    pip install RPi.GPIO spidev adafruit-circuitpython-max31855
-    # or: pip install gpiozero adafruit-blinka adafruit-circuitpython-max31855
+## ESP8266 bridge wiring (see docs/wiring-guide.md)
+  D5 GPIO14 CLK, D6 GPIO12 MISO
+  D1 GPIO5 CS-TC1, D2 GPIO4 CS-TC2, D7 GPIO13 CS-TC3
+  D8 GPIO15 SSR PWM, D3 GPIO0 Servo A, D4 GPIO2 Servo B
 
-Dependencies (dev/Windows — mock mode):
+Dependencies (RPi gpio mode):
+    pip install RPi.GPIO spidev adafruit-circuitpython-max31855
+    # RPi 5: pip install rpi-lgpio adafruit-circuitpython-max31855
+
+Dependencies (http mode — NUC/Windows):
+    pip install requests    (standard, usually already installed)
+
+Dependencies (mock mode):
     None (pure Python stubs)
 """
 
+import json
 import threading
 import time
 import math
 from typing import Optional
 
-# Try to import RPi GPIO — fall back to mock layer on non-RPi platforms
+# Try to import RPi GPIO — fall back gracefully on non-RPi platforms
 try:
     import RPi.GPIO as GPIO
     import spidev
@@ -52,6 +72,14 @@ try:
 except ImportError:
     GPIO = None
     RPI_AVAILABLE = False
+
+# HTTP client for ESP8266 bridge transport
+try:
+    import requests as _requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    _requests = None
+    REQUESTS_AVAILABLE = False
 
 
 # ── Hardware constants ─────────────────────────────────────────────────────────
@@ -205,11 +233,27 @@ class ThermalController:
         tc.shutdown()
     """
 
-    def __init__(self, plc=None):
-        self._plc   = plc           # Optional LogoDriver instance
+    def __init__(self, plc=None, transport: str = "auto",
+                 esp_host: str = "192.168.1.60", esp_port: int = 80):
+        """
+        Parameters
+        ----------
+        plc : LogoDriver | None
+            Optional LOGO! PLC driver for safety interlock reads.
+        transport : str
+            "auto"  — use "gpio" if RPi.GPIO available, else "mock"
+            "gpio"  — Raspberry Pi GPIO/SPI direct (RPi 4 or 5 + rpi-lgpio)
+            "http"  — ESP8266 thermal bridge HTTP API
+            "mock"  — fully stubbed simulation (dev/Windows)
+        esp_host : str
+            IP address of the ESP8266 bridge (transport="http" only).
+        esp_port : int
+            HTTP port of the bridge (default 80).
+        """
+        self._plc   = plc
         self._lock  = threading.Lock()
         self._gpio  = None
-        self._tc_sensors = {}       # name → sensor object
+        self._tc_sensors = {}
         self._heater_pwm = None
         self._servo_a_pwm = None
         self._servo_b_pwm = None
@@ -217,6 +261,12 @@ class ThermalController:
         self._setpoint_c = 25.0
         self._running    = False
         self._thread: Optional[threading.Thread] = None
+
+        # Resolve transport
+        if transport == "auto":
+            transport = "gpio" if RPI_AVAILABLE else "mock"
+        self._transport = transport
+        self._esp_base  = f"http://{esp_host}:{esp_port}"
 
         # Telemetry (updated by control loop)
         self.temps: dict[str, Optional[float]] = {k: None for k in TC_CHANNELS}
@@ -230,8 +280,8 @@ class ThermalController:
     # ------------------------------------------------------------------
 
     def init(self) -> None:
-        """Set up GPIO, SPI, and thermocouple sensors."""
-        if RPI_AVAILABLE:
+        """Set up hardware transport (GPIO, HTTP bridge, or mock)."""
+        if self._transport == "gpio":
             import board, busio, digitalio, adafruit_max31855
             spi = busio.SPI(board.SCK, MISO=board.MISO)
             cs_pins = {
@@ -256,6 +306,27 @@ class ThermalController:
             self._servo_a_pwm.start(0)
             self._servo_b_pwm.start(0)
             self._gpio = GPIO
+
+        elif self._transport == "http":
+            if not REQUESTS_AVAILABLE:
+                raise RuntimeError(
+                    "transport='http' requires the 'requests' library.\n"
+                    "Install with: pip install requests --break-system-packages"
+                )
+            # No local GPIO — verify the bridge is reachable
+            try:
+                r = _requests.get(f"{self._esp_base}/status", timeout=5)
+                r.raise_for_status()
+            except Exception as e:
+                raise RuntimeError(
+                    f"Cannot reach ESP8266 thermal bridge at {self._esp_base}: {e}\n"
+                    "Check that the D1 Mini is powered, connected to WiFi, and "
+                    "secrets.h has the correct IP."
+                )
+            # Stub sensors — reads go to HTTP
+            for name in TC_CHANNELS:
+                self._tc_sensors[name] = None
+
         else:
             # Mock mode — stub sensors for dev/Windows
             for name in TC_CHANNELS:
@@ -283,6 +354,21 @@ class ThermalController:
 
     def read_temp(self, channel: str) -> Optional[float]:
         """Read one thermocouple channel. Returns None on sensor fault."""
+        if self._transport == "http":
+            # Batch fetch all temps and cache; return the requested channel
+            try:
+                r = _requests.get(f"{self._esp_base}/sensors", timeout=3)
+                data = r.json()
+                key_map = {
+                    "TC1_AMBIENT": "tc1_c",
+                    "TC2_DUT":     "tc2_c",
+                    "TC3_HEATER":  "tc3_c",
+                    "TC4_EXHAUST": "tc4_c",
+                }
+                return data.get(key_map.get(channel))
+            except Exception:
+                return None
+
         sensor = self._tc_sensors.get(channel)
         if not sensor:
             return None
@@ -292,6 +378,18 @@ class ThermalController:
             return None
 
     def read_all_temps(self) -> dict:
+        if self._transport == "http":
+            try:
+                r = _requests.get(f"{self._esp_base}/sensors", timeout=3)
+                data = r.json()
+                return {
+                    "TC1_AMBIENT": data.get("tc1_c"),
+                    "TC2_DUT":     data.get("tc2_c"),
+                    "TC3_HEATER":  data.get("tc3_c"),
+                    "TC4_EXHAUST": data.get("tc4_c"),
+                }
+            except Exception:
+                return {k: None for k in TC_CHANNELS}
         return {name: self.read_temp(name) for name in TC_CHANNELS}
 
     def set_setpoint(self, temp_c: float) -> None:
@@ -313,10 +411,15 @@ class ThermalController:
         """Set heater duty cycle (0–100 %). Capped at HEATER_MAX_DUTY."""
         duty = max(0.0, min(HEATER_MAX_DUTY, duty))
         self.heater_duty = duty
-        if self._heater_pwm:
+        if self._transport == "http":
+            try:
+                _requests.post(f"{self._esp_base}/heater",
+                               json={"duty": int(duty)}, timeout=3)
+            except Exception:
+                pass
+        elif self._heater_pwm:
             self._heater_pwm.ChangeDutyCycle(duty)
         if self._plc:
-            # Energise LOGO! heater relay when duty > 0
             try:
                 self._plc.set_named_output("HEATER_RELAY", duty > 0)
             except Exception:
@@ -338,6 +441,15 @@ class ThermalController:
 
     def _set_servo_angle(self, vent: str, angle_deg: float) -> None:
         """Convert angle (0–180°) to servo PWM duty cycle."""
+        if self._transport == "http":
+            pct = int(angle_deg / 180.0 * 100)
+            payload = {"a": pct} if vent == "A" else {"b": pct}
+            try:
+                _requests.post(f"{self._esp_base}/servo",
+                               json=payload, timeout=3)
+            except Exception:
+                pass
+            return
         pulse_us = SERVO_MIN_US + (SERVO_MAX_US - SERVO_MIN_US) * angle_deg / 180.0
         duty_pct = pulse_us / (1_000_000.0 / SERVO_PWM_HZ) * 100.0
         pwm = self._servo_a_pwm if vent == "A" else self._servo_b_pwm
@@ -413,11 +525,11 @@ class ThermalController:
 
     def status(self) -> dict:
         return {
-            "temps":          dict(self.temps),
-            "setpoint_c":     self._setpoint_c,
+            "temps":           dict(self.temps),
+            "setpoint_c":      self._setpoint_c,
             "heater_duty_pct": self.heater_duty,
-            "vent_position":  dict(self.vent_position),
-            "control_active": self.control_active,
-            "fault":          self.fault_message,
-            "hardware_mode":  "RPi" if RPI_AVAILABLE else "mock",
+            "vent_position":   dict(self.vent_position),
+            "control_active":  self.control_active,
+            "fault":           self.fault_message,
+            "transport":       self._transport,
         }

@@ -1,6 +1,15 @@
 {
   "_comment": "Thermal test rig hardware configuration. Edit to match your wiring.",
 
+  "transport": "http",
+  "_transport_comment": "gpio=Raspberry Pi GPIO/SPI | http=ESP8266 thermal bridge | mock=dev/Windows simulation. 'auto' selects gpio if RPi.GPIO available, else mock.",
+
+  "esp8266": {
+    "host": "192.168.1.60",
+    "port": 80,
+    "_comment": "IP of the WeMos D1 Mini running esp8266/thermal-bridge/. Must match secrets.h BRIDGE_IP. Set a DHCP reservation in your router so this IP is stable."
+  },
+
   "plc": {
     "host": "192.168.1.100",
     "port": 502,
