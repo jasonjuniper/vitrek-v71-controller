@@ -676,8 +676,9 @@ def api_plc_io():
     try:
         return jsonify({
             "ok": True,
-            "inputs":  _plc.get_all_inputs(),
-            "outputs": _plc.get_all_outputs(),
+            "inputs":      _plc.get_all_inputs(),
+            "outputs":     _plc.get_all_outputs(),      # actual Q relay states
+            "sw_enables":  _plc.get_all_sw_enables(),   # M-marker software requests
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500

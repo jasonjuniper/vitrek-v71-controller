@@ -41,17 +41,34 @@ This document specifies all function blocks for the LOGO! Soft Comfort program. 
 
 Enable Modbus server in LOGO! Soft Comfort: **Tools → Ethernet → Modbus server → Enable**.
 
+### Software enable inputs (written by RPi — M marker coils)
+
+The RPi writes these marker flags as "software requests". The ladder ANDs each one with the hardware safety gate before driving the physical relay. This ensures the E-stop, door interlock, and overtemp cutout always take precedence over software.
+
+| Modbus address | Access | LOGO! variable | Description                                      |
+|----------------|--------|----------------|--------------------------------------------------|
+| Coil 2         | R/W    | M3             | SW_HEATER — RPi software heater request → gates Q1 |
+| Coil 3         | R/W    | M4             | SW_SERVO  — RPi software servo-power request → gates Q2 |
+| Coil 4         | R/W    | M5             | SW_DUT    — RPi software DUT-power request → gates Q3 |
+
+### Physical output read-back (Q coils — read only from RPi)
+
 | Modbus address | Access | LOGO! variable | Description                              |
 |----------------|--------|----------------|------------------------------------------|
-| Coil 8192      | R/W    | Q1 coil        | Heater relay software command            |
-| Coil 8193      | R/W    | Q2 coil        | Servo power relay software command       |
-| Coil 8194      | R/W    | Q3 coil        | DUT power relay software command         |
-| Coil 8195      | R/W    | Q4 coil        | Alarm beacon software command            |
-| Input 8192     | R      | I1 state       | E-stop physical state (1=safe)           |
-| Input 8193     | R      | I2 state       | Door interlock (1=closed)                |
-| Input 8194     | R      | I3 state       | HW overtemp (1=tripped)                  |
-| Input 8195     | R      | I4 state       | Manual start button (1=pressed)          |
-| Input 8196     | R      | I5 state       | Manual stop button (1=pressed)           |
+| Coil 8192      | R      | Q1             | Heater relay actual state (read-back)    |
+| Coil 8193      | R      | Q2             | Servo power relay actual state           |
+| Coil 8194      | R      | Q3             | DUT relay actual state                   |
+| Coil 8195      | R      | Q4             | Alarm beacon actual state (ladder-only)  |
+
+### Physical input monitoring (discrete inputs — read only)
+
+| Modbus address | Access | LOGO! variable | Description                              |
+|----------------|--------|----------------|------------------------------------------|
+| Input 8192     | R      | I1             | E-stop physical state (1=safe)           |
+| Input 8193     | R      | I2             | Door interlock (1=closed)                |
+| Input 8194     | R      | I3             | HW overtemp (1=tripped)                  |
+| Input 8195     | R      | I4             | Manual start button (1=pressed)          |
+| Input 8196     | R      | I5             | Manual stop button (1=not-pressed=safe)  |
 
 ---
 
@@ -75,41 +92,41 @@ FBD Network 1:
 ### Network 2 — Run flag SR latch (M2)
 
 ```
-SET input:   [I4 NO] OR [Modbus run coil (VM)]
-RESET input: [I5 NC] OR [M1 NC] (safety gate fault)
+SET input:   [I4 NO] (manual start button)
+RESET input: [I5 NC inverted] OR [M1 inverted] (stop button OR safety gate lost)
 Output:      ──►(M2 = "run permitted")
 ```
 
 ### Network 3 — Q1 Heater relay
 
 ```
-[M1 NO] ──[M2 NO] ──[Modbus Q1 coil]──►(Q1)
+[M1 NO] ──[M2 NO] ──[M3 NO (SW_HEATER)]──►(Q1)
 ```
-Heater energises only when: safety OK AND run latched AND software commands it.
+Heater energises only when: safety OK AND run latched AND RPi software requests it (M3).
 
 ### Network 4 — Q2 Servo power relay
 
 ```
-[M1 NO] ──[Modbus Q2 coil]──►(Q2)
+[M1 NO] ──[M4 NO (SW_SERVO)]──►(Q2)
 ```
-Servo power requires only the safety gate (not the run latch — servos may be positioned during idle).
+Servo power requires only the safety gate and software request (M4). No run latch needed — servos may be positioned during idle or cool-down.
 
 ### Network 5 — Q3 DUT power relay
 
 ```
-[M1 NO] ──[M2 NO] ──[Modbus Q3 coil]──►(Q3)
+[M1 NO] ──[M2 NO] ──[M5 NO (SW_DUT)]──►(Q3)
 ```
-DUT power follows the same pattern as the heater.
+DUT power requires all three conditions like the heater. M5 is the software request written by the RPi.
 
 ### Network 6 — Q4 Alarm beacon
 
 ```
-[I1 NC] ──OR──[I2 NC] ──OR──[I3 NO] ──►(Q4)
+[I1 NC inverted] ──OR──[I2 NC inverted] ──OR──[I3 NO]──►(Q4)
 ```
-Alarm fires immediately on any safety fault, regardless of software state.
-- I1 NC = alarm when E-stop tripped (I1=LOW)
-- I2 NC = alarm when door open (I2=LOW)
-- I3 NO = alarm when HW overtemp active (I3=HIGH)
+Alarm fires immediately on any safety fault, independent of all software state. Cannot be silenced by writing M markers — only clearing the hardware fault extinguishes it.
+- NOT(I1) = alarm when E-stop tripped (I1 LOW → inverted → HIGH → alarm)
+- NOT(I2) = alarm when door open (I2 LOW → inverted → HIGH → alarm)
+- I3 = alarm when HW overtemp active (I3 HIGH → alarm)
 
 ---
 

@@ -20,7 +20,21 @@ Enable Modbus server in LOGO! Soft Comfort: Network → Modbus settings.
 | Holding   | 528–531        | V0–V850 (VM memory)       |
 +-----------+----------------+---------------------------+
 
-This driver uses the standard Q-coil addresses and V-memory registers.
+## Safety Architecture
+Software output control goes through LOGO! marker flags (M markers), NOT
+directly to Q output coils.  The LOGO! ladder program ANDs each M-marker
+"software enable" with hardware safety conditions (I1/I2/I3) before
+energising the physical relay.  This means a fault on I1 (E-stop), I2
+(door interlock), or I3 (overtemp cutout) de-energises Q1/Q3 immediately
+at the PLC — even if the RPi software hangs and never clears its M bit.
+
+  M3 (coil 2) = SW_HEATER_ENABLE  →  Q1 = M1_safe AND M2_run AND M3
+  M4 (coil 3) = SW_SERVO_ENABLE   →  Q2 = M1_safe AND M4
+  M5 (coil 4) = SW_DUT_ENABLE     →  Q3 = M1_safe AND M2_run AND M5
+  Q4 (alarm) is driven purely by the ladder from I1/I2/I3 faults.
+
+M1 and M2 are internal ladder flags; they are computed by the LOGO! FBD
+program and are NOT written by this driver.
 
 Dependencies:
     pip install pymodbus>=3.0
@@ -28,8 +42,8 @@ Dependencies:
 Usage:
     plc = LogoDriver()
     plc.connect("192.168.1.100")
-    plc.set_output(1, True)    # Energise Q1 (heater relay)
-    plc.get_input(1)           # Read I1 (e-stop)
+    plc.set_named_output("HEATER_RELAY", True)   # request heater ON
+    plc.get_input(1)                              # read I1 (e-stop)
     plc.disconnect()
 """
 
@@ -52,11 +66,14 @@ class LogoError(Exception):
 
 
 # ── LOGO! 8 Modbus address constants ──────────────────────────────────────────
-# Digital outputs Q1–Q8: coil address base = 8192
+# Digital outputs Q1–Q8: coil address base = 8192  (READ only from this driver)
 Q_COIL_BASE = 8192
 
 # Digital inputs I1–I8: discrete input address base = 8192
 I_INPUT_BASE = 8192
+
+# Marker flags M1–M8: coil addresses 0–7
+M_COIL_BASE = 0
 
 # VM (variable memory) holding register base: byte-addressed, word = 2 bytes
 VM_REG_BASE = 0   # register address = VM byte offset // 2
@@ -65,15 +82,26 @@ VM_REG_BASE = 0   # register address = VM byte offset // 2
 # These match the wiring guide in docs/wiring-guide.md.
 # Adjust if your wiring differs.
 
-OUTPUTS = {
-    "HEATER_RELAY":   1,   # Q1 — SSR enable for main heater circuit
-    "VENT_RELAY":     2,   # Q2 — 24V power to servo/actuator rail
-    "DUT_RELAY":      3,   # Q3 — DUT power enable relay
-    "ALARM_OUTPUT":   4,   # Q4 — external alarm beacon / indicator
-    "AUX_RELAY_1":    5,   # Q5 — spare
-    "AUX_RELAY_2":    6,   # Q6 — spare
-    "AUX_RELAY_3":    7,   # Q7 — spare
-    "AUX_RELAY_4":    8,   # Q8 — spare
+# Software enable M markers written by this driver (coil = M_COIL_BASE + n-1).
+# The ladder ANDs these with hardware safety before driving the Q relay.
+# M1 and M2 are reserved for internal ladder use (safety gate and run latch).
+SW_ENABLES = {
+    "HEATER_RELAY":   3,   # M3 (coil 2) → Q1 controlled by ladder
+    "VENT_RELAY":     4,   # M4 (coil 3) → Q2 controlled by ladder
+    "DUT_RELAY":      5,   # M5 (coil 4) → Q3 controlled by ladder
+    # Q4 (ALARM) is driven directly by the ladder — not writable from here.
+}
+
+# Actual physical Q output coil addresses (used for READ-BACK only).
+Q_OUTPUTS = {
+    "HEATER_RELAY":   1,   # Q1
+    "VENT_RELAY":     2,   # Q2
+    "DUT_RELAY":      3,   # Q3
+    "ALARM_OUTPUT":   4,   # Q4 — ladder-driven, read-back only
+    "AUX_RELAY_1":    5,   # Q5
+    "AUX_RELAY_2":    6,   # Q6
+    "AUX_RELAY_3":    7,   # Q7
+    "AUX_RELAY_4":    8,   # Q8
 }
 
 INPUTS = {
@@ -147,43 +175,55 @@ class LogoDriver:
             return False
 
     # ------------------------------------------------------------------
-    # Digital outputs (Q coils)
+    # Software enables (M marker coils — safety-gated by ladder)
     # ------------------------------------------------------------------
 
-    def set_output(self, q: int, state: bool) -> None:
+    def set_named_output(self, name: str, state: bool) -> None:
         """
-        Set digital output Qn (1-based) ON or OFF.
-        Writes to the LOGO! Q coil address: Q_COIL_BASE + (q - 1).
+        Request an output ON or OFF by writing the matching M-marker coil.
+        The LOGO! ladder enforces hardware safety (I1/I2/I3) before the
+        physical relay actually energises — so this call does NOT bypass
+        the E-stop or door interlock.
         """
-        self._validate_q(q)
-        addr = Q_COIL_BASE + (q - 1)
+        if name not in SW_ENABLES:
+            raise LogoError(
+                f"Unknown controllable output '{name}'. "
+                f"Valid: {list(SW_ENABLES)}. "
+                f"Note: ALARM_OUTPUT is ladder-only."
+            )
+        m_num = SW_ENABLES[name]
+        addr = M_COIL_BASE + (m_num - 1)
         with self._lock:
             result = self._client.write_coil(addr, state)
             if result.isError():
-                raise LogoError(f"Write coil Q{q} failed: {result}")
+                raise LogoError(f"Write M{m_num} (SW enable for {name}) failed: {result}")
 
-    def get_output(self, q: int) -> bool:
-        """Read the current state of digital output Qn."""
-        self._validate_q(q)
-        addr = Q_COIL_BASE + (q - 1)
-        return self._read_coil(addr)
-
-    def set_named_output(self, name: str, state: bool) -> None:
-        """Set an output by name (from OUTPUTS dict)."""
-        if name not in OUTPUTS:
-            raise LogoError(f"Unknown output name '{name}'. Valid: {list(OUTPUTS)}")
-        self.set_output(OUTPUTS[name], state)
+    def get_sw_enable(self, name: str) -> bool:
+        """Read the software-enable M-marker state (requested state, not actual relay)."""
+        if name not in SW_ENABLES:
+            raise LogoError(f"Unknown output name '{name}'")
+        m_num = SW_ENABLES[name]
+        return self._read_coil(M_COIL_BASE + (m_num - 1))
 
     def get_named_output(self, name: str) -> bool:
-        if name not in OUTPUTS:
-            raise LogoError(f"Unknown output name '{name}'")
-        return self.get_output(OUTPUTS[name])
+        """Read the ACTUAL relay output state (Q coil read-back from LOGO!)."""
+        if name not in Q_OUTPUTS:
+            raise LogoError(f"Unknown output name '{name}'. Valid: {list(Q_OUTPUTS)}")
+        addr = Q_COIL_BASE + (Q_OUTPUTS[name] - 1)
+        return self._read_coil(addr)
 
     def get_all_outputs(self) -> dict:
-        """Return dict of all Q output states."""
+        """Return dict of all physical Q relay output states (read-back)."""
         return {
-            name: self.get_output(q)
-            for name, q in OUTPUTS.items()
+            name: self._read_coil(Q_COIL_BASE + (q - 1))
+            for name, q in Q_OUTPUTS.items()
+        }
+
+    def get_all_sw_enables(self) -> dict:
+        """Return dict of all M-marker software enable states."""
+        return {
+            name: self._read_coil(M_COIL_BASE + (m - 1))
+            for name, m in SW_ENABLES.items()
         }
 
     # ------------------------------------------------------------------
@@ -233,8 +273,14 @@ class LogoDriver:
         return (len(faults) == 0, faults)
 
     def emergency_stop(self) -> None:
-        """Immediately de-energise all LOGO! outputs."""
-        for name in OUTPUTS:
+        """
+        Clear all software-enable M markers.
+        The ladder will then de-energise Q1/Q2/Q3.  Q4 (alarm) is driven by
+        hardware fault conditions in the ladder — clearing SW enables does
+        not silence it.  The hardware E-stop (I1) independently cuts all
+        outputs at the LOGO! regardless of software state.
+        """
+        for name in SW_ENABLES:
             try:
                 self.set_named_output(name, False)
             except LogoError:
