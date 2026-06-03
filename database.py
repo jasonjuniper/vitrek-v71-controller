@@ -8,6 +8,7 @@ Schema:
   test_steps     – one row per step result within a test session
   sensor_log     – continuous 1-Hz sensor snapshots from the thermal rig
                    (always recording, independent of instrument tests)
+  thermal_tests  – one row per PEC-0063 (or similar) thermal qualification run
 """
 
 import sqlite3
@@ -84,6 +85,26 @@ CREATE INDEX IF NOT EXISTS sensor_log_ts ON sensor_log(ts);
 CREATE INDEX IF NOT EXISTS sensor_log_session ON sensor_log(hipot_session);
 """
 
+THERMAL_TESTS_DDL = """
+CREATE TABLE IF NOT EXISTS thermal_tests (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now')),
+    housing_key     TEXT    NOT NULL,   -- e.g. DSK_Single, UDM_Triple
+    standard        TEXT    NOT NULL,   -- UL_1310 | UL_962A
+    surface_type    TEXT    NOT NULL,   -- metallic | nonmetallic
+    dc_load_w       REAL,              -- applied load in watts
+    tcase_c         REAL,              -- steady-state Tcase (°C)
+    ambient_c       REAL,              -- ambient at time of steady state
+    rise_c          REAL,              -- Tcase - ambient (°C)
+    limit_c         REAL,              -- applicable UL limit
+    margin_c        REAL,              -- positive = headroom, negative = over limit
+    result          TEXT,              -- PASS | MARGINAL | FAIL
+    note            TEXT               -- freeform note (e.g. test stopped early)
+);
+CREATE INDEX IF NOT EXISTS thermal_tests_housing ON thermal_tests(housing_key);
+CREATE INDEX IF NOT EXISTS thermal_tests_result  ON thermal_tests(result);
+"""
+
 
 def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
@@ -100,9 +121,19 @@ def init_db(db_path: str = DB_PATH) -> None:
 
 
 def ensure_sensor_log_table(db_path: str = DB_PATH) -> None:
-    """Create the sensor_log table (called by recorder thread on startup)."""
+    """Create the sensor_log and thermal_tests tables (called on startup)."""
     with get_connection(db_path) as conn:
         conn.executescript(SENSOR_LOG_DDL)
+        conn.executescript(THERMAL_TESTS_DDL)
+
+
+def get_thermal_tests(limit: int = 100, db_path: str = DB_PATH) -> list[dict]:
+    """Return most-recent thermal qualification test results."""
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM thermal_tests ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def log_sensor_snapshot(snap: dict, db_path: str = DB_PATH) -> None:
@@ -236,5 +267,89 @@ def get_stats(db_path: str = DB_PATH) -> dict:
     """Return aggregate pass/fail counts."""
     with get_connection(db_path) as conn:
         total = conn.execute("SELECT COUNT(*) FROM test_sessions WHERE passed IS NOT NULL").fetchone()[0]
+        passed = conn.execute("SELECT COUNT(*) FROM test_sessions WHERE passed=1").fetchone()[0]
+        return {"total": total, "passed": passed, "failed": total - passed}
+                result.get("level"),
+                result.get("breakdown_a"),
+                result.get("measurement"),
+                result.get("arc_a"),
+                datetime.datetime.now().isoformat(),
+            )
+        )
+        return cur.lastrowid
+
+
+def get_sessions(limit: int = 100, db_path: str = DB_PATH) -> list[dict]:
+    """Return most-recent sessions as a list of dicts."""
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM test_sessions ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_session(session_id: int, db_path: str = DB_PATH) -> Optional[dict]:
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM test_sessions WHERE id=?", (session_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_steps(session_id: int, db_path: str = DB_PATH) -> list[dict]:
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM test_steps WHERE session_id=? ORDER BY step_number",
+            (session_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_stats(db_path: str = DB_PATH) -> dict:
+    """Return aggregate pass/fail counts."""
+    with get_connection(db_path) as conn:
+        total = conn.execute("SELECT COUNT(*) FROM test_sessions WHERE passed IS NOT NULL").fetchone()[0]
+        passed = conn.execute("SELECT COUNT(*) FROM test_sessions WHERE passed=1").fetchone()[0]
+        return {"total": total, "passed": passed, "failed": total - passed}
+                result.get("level"),
+                result.get("breakdown_a"),
+                result.get("measurement"),
+                result.get("arc_a"),
+                datetime.datetime.now().isoformat(),
+            )
+        )
+        return cur.lastrowid
+
+
+def get_sessions(limit: int = 100, db_path: str = DB_PATH) -> list[dict]:
+    """Return most-recent sessions as a list of dicts."""
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM test_sessions ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_session(session_id: int, db_path: str = DB_PATH) -> Optional[dict]:
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM test_sessions WHERE id=?", (session_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_steps(session_id: int, db_path: str = DB_PATH) -> list[dict]:
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM test_steps WHERE session_id=? ORDER BY step_number",
+            (session_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_stats(db_path: str = DB_PATH) -> dict:
+    """Return aggregate pass/fail counts."""
+    with get_connection(db_path) as conn:
+        total  = conn.execute("SELECT COUNT(*) FROM test_sessions WHERE passed IS NOT NULL").fetchone()[0]
         passed = conn.execute("SELECT COUNT(*) FROM test_sessions WHERE passed=1").fetchone()[0]
         return {"total": total, "passed": passed, "failed": total - passed}

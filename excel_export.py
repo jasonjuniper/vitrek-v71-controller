@@ -25,7 +25,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, Gradient
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.utils import get_column_letter
 
-from database import get_sessions, get_session, get_steps, DB_PATH
+from database import get_sessions, get_session, get_steps, get_thermal_tests, DB_PATH
 
 # ── Juniper brand palette (ARGB hex, openpyxl format) ─────────────────────────
 J_NAVY        = "FF1A1A2E"   # brand bar / primary headers
@@ -338,11 +338,124 @@ def _write_summary_sheet(wb: openpyxl.Workbook, sessions: list[dict]) -> None:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+def _write_pec0063_sheet(wb: openpyxl.Workbook, rows: list[dict]) -> None:
+    """Write a PEC-0063 thermal qualification results sheet."""
+    ws = wb.create_sheet("PEC-0063 Thermal Results")
+    ws.sheet_view.showGridLines = False
+
+    # ── Banner ────────────────────────────────────────────────────────────────
+    _navy_cell(ws, 1, 1, "PEC-0063 Thermal Qualification — Test Results", size=13, span_end_col=10)
+    ws.row_dimensions[1].height = 22
+    _primary_cell(ws, 2, 1,
+                  "65 W USB-C Power Supply (20 V / 3.25 A) · 66 W test load · Source: DSR 10/7/2025",
+                  span_end_col=10)
+    ws.row_dimensions[2].height = 16
+
+    # ── UL limits reference block ─────────────────────────────────────────────
+    ws.cell(row=3, column=1, value="UL Standard Reference").font = Font(
+        name=BRAND_FONT, bold=True, size=8, color=J_CHARCOAL)
+    limits = [
+        ("UL 962A", "Nonmetallic surface: ≤ 95 °C absolute"),
+        ("UL 1310", "Nonmetallic surface: ≤ +50 °C above ambient  |  Metallic: ≤ +30 °C above ambient"),
+    ]
+    for offset, (std, desc) in enumerate(limits):
+        r = 4 + offset
+        ws.cell(row=r, column=1, value=std).font = Font(name=BRAND_FONT, bold=True, size=8, color=J_PRIMARY)
+        ws.cell(row=r, column=2, value=desc).font = Font(name=BRAND_FONT, size=8, color=J_CHARCOAL)
+        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=10)
+
+    # ── Column headers (row 7) ────────────────────────────────────────────────
+    headers = [
+        "Date", "Housing", "Standard", "Surface",
+        "Load (W)", "Tcase (°C)", "Ambient (°C)", "Rise ΔT (°C)",
+        "Limit (°C)", "Margin (°C)", "Result", "Note",
+    ]
+    HR = 7
+    for col, h in enumerate(headers, 1):
+        _primary_cell(ws, HR, col, h, size=9, bold=True)
+    ws.row_dimensions[HR].height = 18
+
+    # ── Data rows ─────────────────────────────────────────────────────────────
+    RESULT_COLORS = {
+        "PASS":     (PASS_BG,       PASS_FG),
+        "MARGINAL": (INCOMPLETE_BG, INCOMPLETE_FG),
+        "FAIL":     (FAIL_BG,       FAIL_FG),
+    }
+
+    for dr, row in enumerate(rows):
+        r = HR + 1 + dr
+        result = (row.get("result") or "").upper()
+        bg, fg = RESULT_COLORS.get(result, (J_OFFWHITE, J_CHARCOAL))
+        alt_bg = "FFF8F9FA" if dr % 2 else "FFFFFFFF"
+
+        def _cell(col, val, bold=False, align="left", num_format=None, color=None):
+            c = ws.cell(row=r, column=col, value=val)
+            c.font      = Font(name=BRAND_FONT, size=9, bold=bold,
+                               color=(fg if col == len(headers) else J_CHARCOAL))
+            c.fill      = PatternFill("solid", fgColor=(bg if col == len(headers) else alt_bg))
+            c.alignment = Alignment(horizontal=align, vertical="center")
+            c.border    = _border()
+            if num_format:
+                c.number_format = num_format
+            return c
+
+        _cell(1,  row.get("started_at", "")[:10])
+        _cell(2,  row.get("housing_key", ""))
+        _cell(3,  row.get("standard", ""))
+        _cell(4,  row.get("surface_type", ""))
+        _cell(5,  row.get("dc_load_w"),   align="center", num_format="0.0")
+        _cell(6,  row.get("tcase_c"),     align="center", num_format="0.0")
+        _cell(7,  row.get("ambient_c"),   align="center", num_format="0.0")
+        _cell(8,  row.get("rise_c"),      align="center", num_format="+0.0;-0.0")
+        _cell(9,  row.get("limit_c"),     align="center", num_format="0")
+        _cell(10, row.get("margin_c"),    align="center", num_format="+0.0;-0.0")
+        # Result cell gets coloured bg
+        rc = ws.cell(row=r, column=11, value=result)
+        rc.font      = Font(name=BRAND_FONT, size=9, bold=True, color=fg)
+        rc.fill      = PatternFill("solid", fgColor=bg)
+        rc.alignment = Alignment(horizontal="center", vertical="center")
+        rc.border    = _border()
+        _cell(12, row.get("note", ""))
+
+    # ── Baseline reference block (from DSR) ───────────────────────────────────
+    if not rows:
+        # If no new test data, still show the baselines
+        baseline = [
+            ("2025-10-20", "UDM_Single", "UL_1310", "nonmetallic", 66, 93, 23, 70, 50, -20, "FAIL", "Test stopped after 2 hrs"),
+            ("2025-10-20", "DSK_Single", "UL_1310", "nonmetallic", 66, 85, 22, 63, 50, -13, "FAIL", ""),
+            ("2025-10-20", "NCP_Single", "UL_1310", "nonmetallic", 66, 77, 24, 53, 50, -3,  "FAIL", ""),
+            ("2025-10-20", "DSK_Triple", "UL_1310", "nonmetallic", 66, 75, 24, 51, 50, -1,  "FAIL", ""),
+            ("2025-10-20", "UDM_Triple", "UL_1310", "nonmetallic", 66, 85, 24, 61, 50, -11, "FAIL", ""),
+            ("2025-10-20", "DSK_Double", "UL_1310", "nonmetallic", 66, 85, 24, 61, 50, -11, "FAIL", ""),
+        ]
+        note_row = HR + 1
+        _navy_cell(ws, note_row, 1, "Baseline results from DSR 10/7/2025 (no new station data yet)",
+                   size=9, bold=False, span_end_col=12)
+        for dr, b in enumerate(baseline):
+            r = note_row + 1 + dr
+            vals = list(b)
+            result = vals[10].upper()
+            bg, fg = RESULT_COLORS.get(result, (J_OFFWHITE, J_CHARCOAL))
+            alt_bg = "FFF8F9FA" if dr % 2 else "FFFFFFFF"
+            for col, val in enumerate(vals, 1):
+                c = ws.cell(row=r, column=col, value=val)
+                c.font      = Font(name=BRAND_FONT, size=9, italic=True,
+                                   color=(fg if col == 11 else J_CHARCOAL))
+                c.fill      = PatternFill("solid", fgColor=(bg if col == 11 else alt_bg))
+                c.alignment = Alignment(horizontal="center" if col > 4 else "left", vertical="center")
+                c.border    = _border()
+
+    # ── Column widths ─────────────────────────────────────────────────────────
+    widths = [12, 14, 10, 12, 9, 12, 13, 13, 10, 12, 10, 28]
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+
 def export_to_excel(output_path: str,
                     session_ids: Optional[list[int]] = None,
                     db_path: str = DB_PATH) -> str:
     """
-    Export sessions to a Juniper-branded Excel file.
+    Export sessions and PEC-0063 thermal results to a Juniper-branded Excel file.
     If session_ids is None, exports all sessions (most recent first, up to 500).
     Returns the path to the written file.
     """
@@ -358,6 +471,10 @@ def export_to_excel(output_path: str,
     for session in sessions:
         steps = get_steps(session["id"], db_path)
         _write_session_sheet(wb, session, steps)
+
+    # PEC-0063 thermal qualification sheet
+    thermal_rows = get_thermal_tests(limit=500, db_path=db_path)
+    _write_pec0063_sheet(wb, thermal_rows)
 
     wb.save(output_path)
     return output_path

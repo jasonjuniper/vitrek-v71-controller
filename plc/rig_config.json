@@ -96,6 +96,93 @@
     }
   },
 
+  "ul_temperature_limits": {
+    "_comment": "Surface temperature limits per UL standard. Source: PEC-0063 Thermal Design Review (DSR 10/7/2025).",
+    "UL_962A": {
+      "description": "Household and Commercial Furnishings",
+      "metallic_surface_max_c":    70,
+      "nonmetallic_surface_max_c": 95
+    },
+    "UL_1310": {
+      "description": "Class 2 Power Units",
+      "metallic_rise_max_c":    30,
+      "nonmetallic_rise_max_c": 50
+    }
+  },
+
+  "pec0063_thermal_qualification": {
+    "_comment": "65 W USB-C power supply (20 V / 3.25 A). Apply 66 W load, monitor Tcase and ambient to steady state, evaluate against selected UL standard.",
+    "dc_load": {
+      "mode":          "CP",
+      "setpoint_w":    66.0,
+      "ovp_limit_v":   25.0,
+      "ocp_limit_a":   5.0,
+      "description":   "66 W constant-power load (slightly above rated 65 W per test spec)"
+    },
+    "tcase_channel":   "TC2_DUT",
+    "ambient_channel": "TC1_AMBIENT",
+    "tcase_placement": "Midway down the body of the PEC-0063 enclosure",
+    "steady_state": {
+      "tolerance_c":   1.0,
+      "window_s":      300,
+      "description":   "Steady state when Tcase varies < 1 °C over any 5-minute window"
+    },
+    "max_duration_s":  14400,
+    "poll_interval_s": 10,
+    "default_standard":     "UL_1310",
+    "default_surface_type": "nonmetallic",
+    "housings": {
+      "UDM_Single": {
+        "description":       "Under-desk mount — single",
+        "baseline_tcase_c":  93,
+        "baseline_ambient_c": 23,
+        "baseline_rise_c":   70,
+        "baseline_note":     "Test stopped after 2 hrs — did not reach steady state",
+        "baseline_date":     "2025-10-20"
+      },
+      "DSK_Single": {
+        "description":       "Desk mount — single",
+        "baseline_tcase_c":  85,
+        "baseline_ambient_c": 22,
+        "baseline_rise_c":   63,
+        "baseline_note":     "",
+        "baseline_date":     "2025-10-20"
+      },
+      "DSK_Double": {
+        "description":       "Desk mount — double",
+        "baseline_tcase_c":  85,
+        "baseline_ambient_c": 24,
+        "baseline_rise_c":   61,
+        "baseline_note":     "",
+        "baseline_date":     "2025-10-20"
+      },
+      "DSK_Triple": {
+        "description":       "Desk mount — triple",
+        "baseline_tcase_c":  75,
+        "baseline_ambient_c": 24,
+        "baseline_rise_c":   51,
+        "baseline_note":     "",
+        "baseline_date":     "2025-10-20"
+      },
+      "UDM_Triple": {
+        "description":       "Under-desk mount — triple",
+        "baseline_tcase_c":  85,
+        "baseline_ambient_c": 24,
+        "baseline_rise_c":   61,
+        "baseline_note":     "",
+        "baseline_date":     "2025-10-20"
+      },
+      "NCP_Single": {
+        "description":       "NCP/MUD plastic junction box — single",
+        "baseline_tcase_c":  77,
+        "baseline_ambient_c": 24,
+        "baseline_rise_c":   53,
+        "baseline_note":     "",
+        "baseline_date":     "2025-10-20"
+      }
+    }
+  },
+
   "instruments": {
     "hipot": {
       "driver": "v71_driver",

@@ -75,6 +75,7 @@ from flask import (Flask, jsonify, request, send_file,
 
 import database as db
 from excel_export import export_to_excel
+from pec0063_test import PEC0063Test, evaluate_ul
 
 # Drivers — loaded lazily so the app starts even without hardware
 try:
@@ -129,6 +130,9 @@ _dcload:  "SDL1020XDriver | None"  = None
 _hipot_session_id: int | None = None
 _hipot_step_types: list[str]  = []
 _hipot_run_thread: threading.Thread | None = None
+
+# PEC-0063 thermal qualification test
+_pec0063_test = None   # PEC0063Test instance when running
 
 # Continuous sensor recorder
 _recorder_thread: threading.Thread | None = None
@@ -711,6 +715,97 @@ def api_session(session_id):
     if not session:
         return jsonify({"ok": False, "error": "Not found"}), 404
     return jsonify({"ok": True, "session": session, "steps": db.get_steps(session_id)})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PEC-0063 THERMAL QUALIFICATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/pec0063/housings")
+def api_pec0063_housings():
+    """Return the list of housing configs and baseline results from rig_config.json."""
+    pec_cfg = RIG_CONFIG.get("pec0063_thermal_qualification", {})
+    return jsonify({
+        "ok":      True,
+        "housings": pec_cfg.get("housings", {}),
+        "dc_load":  pec_cfg.get("dc_load", {}),
+    })
+
+
+@app.route("/api/pec0063/start", methods=["POST"])
+def api_pec0063_start():
+    global _pec0063_test
+    if _active_instrument not in (None, "dcload"):
+        return jsonify({"ok": False, "error": "A different instrument is active — disconnect it first."}), 400
+
+    d = request.get_json(force=True)
+    housing  = d.get("housing_key", "DSK_Single")
+    standard = d.get("standard", "UL_1310")
+    surface  = d.get("surface", "nonmetallic")
+
+    # Validate housing key
+    pec_cfg  = RIG_CONFIG.get("pec0063_thermal_qualification", {})
+    if housing not in pec_cfg.get("housings", {}):
+        return jsonify({"ok": False,
+                        "error": f"Unknown housing '{housing}'. Valid: {list(pec_cfg['housings'])}"}), 400
+
+    if _pec0063_test and _pec0063_test.status.state == "running":
+        return jsonify({"ok": False, "error": "A PEC-0063 test is already running."}), 400
+
+    conn = db.get_connection()
+    _pec0063_test = PEC0063Test(
+        thermal_ctrl = _thermal,
+        dc_load      = _dcload,
+        db           = conn,
+        housing_key  = housing,
+        standard     = standard,
+        surface      = surface,
+    )
+    try:
+        _pec0063_test.start()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify({"ok": True, "housing": housing, "standard": standard, "surface": surface})
+
+
+@app.route("/api/pec0063/status")
+def api_pec0063_status():
+    if not _pec0063_test:
+        return jsonify({"ok": True, "state": "idle"})
+    return jsonify({"ok": True, **_pec0063_test.get_status()})
+
+
+@app.route("/api/pec0063/stop", methods=["POST"])
+def api_pec0063_stop():
+    if not _pec0063_test or _pec0063_test.status.state not in ("running", "steady_state"):
+        return jsonify({"ok": False, "error": "No test running."}), 400
+    _pec0063_test.stop()
+    return jsonify({"ok": True, "state": _pec0063_test.status.state})
+
+
+@app.route("/api/pec0063/results")
+def api_pec0063_results():
+    """Return all saved thermal qualification test results from the database."""
+    db.ensure_sensor_log_table()
+    rows = db.get_thermal_tests(limit=int(request.args.get("limit", 200)))
+    return jsonify({"ok": True, "results": rows, "count": len(rows)})
+
+
+@app.route("/api/pec0063/evaluate", methods=["POST"])
+def api_pec0063_evaluate():
+    """One-shot UL evaluation for a given Tcase and ambient — no hardware needed."""
+    d = request.get_json(force=True)
+    try:
+        result = evaluate_ul(
+            tcase_c  = float(d["tcase_c"]),
+            ambient_c= float(d["ambient_c"]),
+            standard = d.get("standard", "UL_1310"),
+            surface  = d.get("surface", "nonmetallic"),
+        )
+        return jsonify({"ok": True, "evaluation": result})
+    except (KeyError, ValueError) as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
 
 
 @app.route("/api/export")
@@ -1310,6 +1405,7 @@ async function thConnect(){
 }
 async function thDisconnect(){await fetch('/api/disconnect',{method:'POST'});thSetConn(false);if(thPoll)clearInterval(thPoll);}
 function thSetConn(c){
+  document.getElementById('th-btn-connect').disabled=c;
   document.getElementById('th-btn-connect').disabled=c;
   document.getElementById('th-btn-disconnect').disabled=!c;
   document.getElementById('th-start-pid').disabled=!c;
