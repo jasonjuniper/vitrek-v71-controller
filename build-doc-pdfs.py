@@ -58,9 +58,11 @@ FONT_BOLD     = _font_url('Poppins-Bold.ttf')
 DOCS = [
     (os.path.join(REPO_ROOT,  'README.md'),                     'README.pdf'),
     (os.path.join(DOCS_DIR,   'wiring-guide.md'),               'wiring-guide.pdf'),
+    (os.path.join(DOCS_DIR,   'breadboard-prototype.md'),       'breadboard-prototype.pdf'),
     (os.path.join(DOCS_DIR,   'plc-ladder-logic.md'),           'plc-ladder-logic.pdf'),
     (os.path.join(DOCS_DIR,   'logo-soft-comfort-guide.md'),    'logo-soft-comfort-guide.pdf'),
     (os.path.join(DOCS_DIR,   'hmi-architecture.md'),           'hmi-architecture.pdf'),
+    (os.path.join(DOCS_DIR,   'sourcing-list.md'),              'sourcing-list.pdf'),
 ]
 
 PAGE_SIZE_CSS = 'Letter'

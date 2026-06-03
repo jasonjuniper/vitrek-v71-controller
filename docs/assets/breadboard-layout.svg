@@ -1,0 +1,313 @@
+<svg viewBox="0 0 900 450" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI', Arial, sans-serif">
+
+  <!-- Background -->
+  <rect width="900" height="450" fill="#f8f8f8" rx="6"/>
+
+  <!-- Title -->
+  <text x="450" y="22" text-anchor="middle" font-size="13" font-weight="700" fill="#1a1a2e">Juniper Test Station — Rig Interface Board Prototype</text>
+  <text x="450" y="37" text-anchor="middle" font-size="9" fill="#555">830-point solderless breadboard · columns 1–30 · rows a–j (a=bottom) · landscape orientation</text>
+
+  <!-- ===================== BREADBOARD BODY ===================== -->
+  <!-- Board body -->
+  <rect x="30" y="50" width="620" height="330" rx="8" fill="#e8e8dc" stroke="#aaa" stroke-width="1.5"/>
+
+  <!-- === TOP POWER RAILS === -->
+  <!-- Top red rail (3.3V) -->
+  <rect x="38" y="56" width="606" height="12" rx="3" fill="#ffcccc" stroke="#cc4444" stroke-width="1"/>
+  <text x="42" y="66" font-size="8" fill="#cc4444" font-weight="700">3.3V +</text>
+
+  <!-- Top black rail (GND) -->
+  <rect x="38" y="71" width="606" height="12" rx="3" fill="#cccccc" stroke="#444" stroke-width="1"/>
+  <text x="42" y="81" font-size="8" fill="#333" font-weight="700">GND</text>
+
+  <!-- === BOTTOM POWER RAILS === -->
+  <!-- Bottom GND rail -->
+  <rect x="38" y="354" width="606" height="12" rx="3" fill="#cccccc" stroke="#444" stroke-width="1"/>
+  <text x="42" y="364" font-size="8" fill="#333" font-weight="700">GND (tied)</text>
+
+  <!-- Bottom unused rail -->
+  <rect x="38" y="369" width="606" height="12" rx="3" fill="#f0f0f0" stroke="#bbb" stroke-width="1"/>
+  <text x="42" y="379" font-size="8" fill="#aaa">unused</text>
+
+  <!-- Center gap label -->
+  <line x1="38" y1="210" x2="644" y2="210" stroke="#bbb" stroke-width="0.5" stroke-dasharray="4,3"/>
+  <text x="648" y="213" font-size="8" fill="#888">gap</text>
+
+  <!-- === TIE POINT GRID HINTS (abbreviated — key columns marked) === -->
+  <!-- Column markers at top -->
+  <text x="70" y="96" text-anchor="middle" font-size="7" fill="#888">1</text>
+  <text x="90" y="96" text-anchor="middle" font-size="7" fill="#888">2</text>
+  <text x="110" y="96" text-anchor="middle" font-size="7" fill="#888">3</text>
+  <text x="130" y="96" text-anchor="middle" font-size="7" fill="#888">4</text>
+  <text x="150" y="96" text-anchor="middle" font-size="7" fill="#888">5</text>
+  <text x="170" y="96" text-anchor="middle" font-size="7" fill="#888">6</text>
+  <text x="190" y="96" text-anchor="middle" font-size="7" fill="#888">7</text>
+  <text x="210" y="96" text-anchor="middle" font-size="7" fill="#888">8</text>
+  <text x="230" y="96" text-anchor="middle" font-size="7" fill="#888">9</text>
+  <text x="250" y="96" text-anchor="middle" font-size="7" fill="#888">10</text>
+  <text x="270" y="96" text-anchor="middle" font-size="7" fill="#888">11</text>
+  <text x="290" y="96" text-anchor="middle" font-size="7" fill="#888">12</text>
+  <text x="310" y="96" text-anchor="middle" font-size="7" fill="#888">13</text>
+  <text x="330" y="96" text-anchor="middle" font-size="7" fill="#888">14</text>
+  <text x="350" y="96" text-anchor="middle" font-size="7" fill="#888">15</text>
+  <text x="370" y="96" text-anchor="middle" font-size="7" fill="#888">16</text>
+  <text x="390" y="96" text-anchor="middle" font-size="7" fill="#888">17</text>
+  <text x="410" y="96" text-anchor="middle" font-size="7" fill="#888">18</text>
+  <text x="430" y="96" text-anchor="middle" font-size="7" fill="#888">19</text>
+  <text x="450" y="96" text-anchor="middle" font-size="7" fill="#888">20</text>
+  <text x="470" y="96" text-anchor="middle" font-size="7" fill="#888">21</text>
+  <text x="490" y="96" text-anchor="middle" font-size="7" fill="#888">22</text>
+  <text x="510" y="96" text-anchor="middle" font-size="7" fill="#888">23</text>
+  <text x="530" y="96" text-anchor="middle" font-size="7" fill="#888">24</text>
+  <text x="550" y="96" text-anchor="middle" font-size="7" fill="#888">25</text>
+  <text x="570" y="96" text-anchor="middle" font-size="7" fill="#888">26</text>
+  <text x="590" y="96" text-anchor="middle" font-size="7" fill="#888">27</text>
+  <text x="610" y="96" text-anchor="middle" font-size="7" fill="#888">28</text>
+  <text x="630" y="96" text-anchor="middle" font-size="7" fill="#888">29</text>
+
+  <!-- Row labels (right side) -->
+  <text x="652" y="106" font-size="8" fill="#888">j</text>
+  <text x="652" y="124" font-size="8" fill="#888">i</text>
+  <text x="652" y="142" font-size="8" fill="#888">h</text>
+  <text x="652" y="160" font-size="8" fill="#888">g</text>
+  <text x="652" y="178" font-size="8" fill="#888">f</text>
+  <text x="652" y="228" font-size="8" fill="#888">e</text>
+  <text x="652" y="246" font-size="8" fill="#888">d</text>
+  <text x="652" y="264" font-size="8" fill="#888">c</text>
+  <text x="652" y="282" font-size="8" fill="#888">b</text>
+  <text x="652" y="300" font-size="8" fill="#888">a</text>
+
+  <!-- Tie point dots — sample dots in key areas only for readability -->
+  <!-- Row f (top half, just above center gap) — y=178; row e (bottom half) — y=228 -->
+  <!-- Draw a representative grid of tie points across the board -->
+  <g fill="#888" opacity="0.5">
+    <!-- Columns 1-30, rows a,b,c,d,e (bottom half) y=300,282,264,246,228 -->
+    <!-- and rows f,g,h,i,j (top half) y=178,160,142,124,106 -->
+    <!-- Only draw key column positions for clarity -->
+    <!-- TC1 area cols 2-7 -->
+    <circle cx="90" cy="228" r="2.5"/> <circle cx="110" cy="228" r="2.5"/> <circle cx="130" cy="228" r="2.5"/>
+    <circle cx="150" cy="228" r="2.5"/> <circle cx="170" cy="228" r="2.5"/> <circle cx="190" cy="228" r="2.5"/>
+    <circle cx="90" cy="178" r="2.5"/> <circle cx="110" cy="178" r="2.5"/> <circle cx="130" cy="178" r="2.5"/>
+    <circle cx="150" cy="178" r="2.5"/> <circle cx="170" cy="178" r="2.5"/> <circle cx="190" cy="178" r="2.5"/>
+    <!-- TC2 area cols 10-15 -->
+    <circle cx="250" cy="228" r="2.5"/> <circle cx="270" cy="228" r="2.5"/> <circle cx="290" cy="228" r="2.5"/>
+    <circle cx="310" cy="228" r="2.5"/> <circle cx="330" cy="228" r="2.5"/> <circle cx="350" cy="228" r="2.5"/>
+    <circle cx="250" cy="178" r="2.5"/> <circle cx="270" cy="178" r="2.5"/> <circle cx="290" cy="178" r="2.5"/>
+    <circle cx="310" cy="178" r="2.5"/> <circle cx="330" cy="178" r="2.5"/> <circle cx="350" cy="178" r="2.5"/>
+    <!-- TC3 area cols 18-23 -->
+    <circle cx="410" cy="228" r="2.5"/> <circle cx="430" cy="228" r="2.5"/> <circle cx="450" cy="228" r="2.5"/>
+    <circle cx="470" cy="228" r="2.5"/> <circle cx="490" cy="228" r="2.5"/> <circle cx="510" cy="228" r="2.5"/>
+    <circle cx="410" cy="178" r="2.5"/> <circle cx="430" cy="178" r="2.5"/> <circle cx="450" cy="178" r="2.5"/>
+    <circle cx="470" cy="178" r="2.5"/> <circle cx="490" cy="178" r="2.5"/> <circle cx="510" cy="178" r="2.5"/>
+    <!-- Resistor area cols 26-28 -->
+    <circle cx="570" cy="300" r="2.5"/> <circle cx="590" cy="300" r="2.5"/> <circle cx="610" cy="300" r="2.5"/>
+    <circle cx="570" cy="282" r="2.5"/> <circle cx="590" cy="282" r="2.5"/> <circle cx="610" cy="282" r="2.5"/>
+    <circle cx="570" cy="264" r="2.5"/> <circle cx="590" cy="264" r="2.5"/> <circle cx="610" cy="264" r="2.5"/>
+  </g>
+
+  <!-- ===================== MAX31855 MODULES ===================== -->
+
+  <!-- MAX31855 #1 — TC1_AMBIENT — cols 2-7, straddles gap -->
+  <rect x="78" y="158" width="124" height="90" rx="5" fill="#006666" stroke="#004444" stroke-width="1.5"/>
+  <text x="140" y="178" text-anchor="middle" font-size="9" fill="white" font-weight="700">MAX31855 #1</text>
+  <text x="140" y="191" text-anchor="middle" font-size="8" fill="#aaffff">TC1_AMBIENT</text>
+  <text x="140" y="204" text-anchor="middle" font-size="7" fill="#88dddd">cols 2–7</text>
+  <text x="140" y="217" text-anchor="middle" font-size="7" fill="#88dddd">CS=GPIO8 · CLK=GPIO11 · DO=GPIO9</text>
+  <!-- Module pin labels -->
+  <text x="86" y="243" font-size="6.5" fill="#006666">VCC</text>
+  <text x="106" y="243" font-size="6.5" fill="#333">GND</text>
+  <text x="124" y="243" font-size="6.5" fill="#555">DO</text>
+  <text x="144" y="243" font-size="6.5" fill="#880088">CS</text>
+  <text x="162" y="243" font-size="6.5" fill="#005500">CLK</text>
+
+  <!-- MAX31855 #2 — TC2_DUT — cols 10-15, straddles gap -->
+  <rect x="238" y="158" width="124" height="90" rx="5" fill="#006666" stroke="#004444" stroke-width="1.5"/>
+  <text x="300" y="178" text-anchor="middle" font-size="9" fill="white" font-weight="700">MAX31855 #2</text>
+  <text x="300" y="191" text-anchor="middle" font-size="8" fill="#aaffff">TC2_DUT</text>
+  <text x="300" y="204" text-anchor="middle" font-size="7" fill="#88dddd">cols 10–15</text>
+  <text x="300" y="217" text-anchor="middle" font-size="7" fill="#88dddd">CS=GPIO7 · CLK shared · DO shared</text>
+  <text x="246" y="243" font-size="6.5" fill="#006666">VCC</text>
+  <text x="266" y="243" font-size="6.5" fill="#333">GND</text>
+  <text x="284" y="243" font-size="6.5" fill="#555">DO</text>
+  <text x="304" y="243" font-size="6.5" fill="#880088">CS</text>
+  <text x="322" y="243" font-size="6.5" fill="#005500">CLK</text>
+
+  <!-- MAX31855 #3 — TC3_HEATER — cols 18-23, straddles gap -->
+  <rect x="398" y="158" width="124" height="90" rx="5" fill="#006666" stroke="#004444" stroke-width="1.5"/>
+  <text x="460" y="178" text-anchor="middle" font-size="9" fill="white" font-weight="700">MAX31855 #3</text>
+  <text x="460" y="191" text-anchor="middle" font-size="8" fill="#aaffff">TC3_HEATER</text>
+  <text x="460" y="204" text-anchor="middle" font-size="7" fill="#88dddd">cols 18–23</text>
+  <text x="460" y="217" text-anchor="middle" font-size="7" fill="#88dddd">CS=GPIO25 · CLK shared · DO shared</text>
+  <text x="406" y="243" font-size="6.5" fill="#006666">VCC</text>
+  <text x="426" y="243" font-size="6.5" fill="#333">GND</text>
+  <text x="444" y="243" font-size="6.5" fill="#555">DO</text>
+  <text x="464" y="243" font-size="6.5" fill="#880088">CS</text>
+  <text x="482" y="243" font-size="6.5" fill="#005500">CLK</text>
+
+  <!-- ===================== DECOUPLING CAPS (C1, C2, C3) ===================== -->
+  <!-- C1 — col 2, E2 to GND rail -->
+  <rect x="84" y="84" width="12" height="22" rx="2" fill="#f5c842" stroke="#b8960c" stroke-width="1"/>
+  <text x="90" y="93" text-anchor="middle" font-size="7" fill="#333">C1</text>
+  <text x="90" y="103" text-anchor="middle" font-size="6" fill="#333">100n</text>
+
+  <!-- C2 — col 10, E10 to GND rail -->
+  <rect x="244" y="84" width="12" height="22" rx="2" fill="#f5c842" stroke="#b8960c" stroke-width="1"/>
+  <text x="250" y="93" text-anchor="middle" font-size="7" fill="#333">C2</text>
+  <text x="250" y="103" text-anchor="middle" font-size="6" fill="#333">100n</text>
+
+  <!-- C3 — col 18, E18 to GND rail -->
+  <rect x="404" y="84" width="12" height="22" rx="2" fill="#f5c842" stroke="#b8960c" stroke-width="1"/>
+  <text x="410" y="93" text-anchor="middle" font-size="7" fill="#333">C3</text>
+  <text x="410" y="103" text-anchor="middle" font-size="6" fill="#333">100n</text>
+
+  <!-- ===================== CS PULL-UP RESISTORS (R1, R2, R3) ===================== -->
+  <!-- R1 — col 5, A5 to top red rail -->
+  <rect x="140" y="84" width="20" height="10" rx="2" fill="#d4a843" stroke="#a07820" stroke-width="1"/>
+  <text x="150" y="92" text-anchor="middle" font-size="7" fill="white" font-weight="600">R1 10k</text>
+
+  <!-- R2 — col 13, A13 to top red rail -->
+  <rect x="300" y="84" width="20" height="10" rx="2" fill="#d4a843" stroke="#a07820" stroke-width="1"/>
+  <text x="310" y="92" text-anchor="middle" font-size="7" fill="white" font-weight="600">R2 10k</text>
+
+  <!-- R3 — col 21, A21 to top red rail -->
+  <rect x="460" y="84" width="20" height="10" rx="2" fill="#d4a843" stroke="#a07820" stroke-width="1"/>
+  <text x="470" y="92" text-anchor="middle" font-size="7" fill="white" font-weight="600">R3 10k</text>
+
+  <!-- ===================== PROTECTION RESISTORS (cols 26-28, bottom rows) ===================== -->
+  <!-- R_SSR — A27-A28 -->
+  <rect x="582" y="295" width="28" height="10" rx="2" fill="#c04040" stroke="#801818" stroke-width="1"/>
+  <text x="596" y="303" text-anchor="middle" font-size="6.5" fill="white" font-weight="600">R_SSR 100Ω</text>
+
+  <!-- R_SVO_A — B26-B27 -->
+  <rect x="562" y="277" width="28" height="10" rx="2" fill="#c06000" stroke="#804000" stroke-width="1"/>
+  <text x="576" y="285" text-anchor="middle" font-size="6.5" fill="white" font-weight="600">R_SVOA 100Ω</text>
+
+  <!-- R_SVO_B — C26-C27 -->
+  <rect x="562" y="259" width="28" height="10" rx="2" fill="#c06000" stroke="#804000" stroke-width="1"/>
+  <text x="576" y="267" text-anchor="middle" font-size="6.5" fill="white" font-weight="600">R_SVOB 100Ω</text>
+
+  <!-- ===================== WIRES ===================== -->
+
+  <!-- 3.3V power rail to TC1 VCC (C1) — red, short drop -->
+  <line x1="90" y1="68" x2="90" y2="84" stroke="#cc2222" stroke-width="2"/>
+
+  <!-- GND rail to C1 bottom -->
+  <line x1="90" y1="78" x2="90" y2="84" stroke="#333" stroke-width="1.5" stroke-dasharray="2,2"/>
+
+  <!-- 3.3V to C2, C3 -->
+  <line x1="250" y1="68" x2="250" y2="84" stroke="#cc2222" stroke-width="2"/>
+  <line x1="410" y1="68" x2="410" y2="84" stroke="#cc2222" stroke-width="2"/>
+
+  <!-- 3.3V to R1, R2, R3 (pull-ups) -->
+  <line x1="150" y1="68" x2="150" y2="84" stroke="#cc2222" stroke-width="2"/>
+  <line x1="310" y1="68" x2="310" y2="84" stroke="#cc2222" stroke-width="2"/>
+  <line x1="470" y1="68" x2="470" y2="84" stroke="#cc2222" stroke-width="2"/>
+
+  <!-- GND rail tie jumper (top black → bottom black at col 30) -->
+  <line x1="636" y1="77" x2="636" y2="359" stroke="#333" stroke-width="2" stroke-dasharray="4,3"/>
+  <text x="640" y="220" font-size="7" fill="#555" transform="rotate(90,640,220)">GND tie jumper</text>
+
+  <!-- SCLK daisy-chain: E6 → E14 → E22 (purple, row f area, top of modules) -->
+  <line x1="170" y1="175" x2="330" y2="175" stroke="#8800cc" stroke-width="2"/>
+  <line x1="330" y1="175" x2="490" y2="175" stroke="#8800cc" stroke-width="2"/>
+
+  <!-- MISO daisy-chain: E4 → E12 → E20 (purple) -->
+  <line x1="130" y1="170" x2="290" y2="170" stroke="#8800cc" stroke-width="2.5" stroke-dasharray="6,2"/>
+  <line x1="290" y1="170" x2="450" y2="170" stroke="#8800cc" stroke-width="2.5" stroke-dasharray="6,2"/>
+
+  <!-- CS lines going up to top area (for label callouts) — purple verticals -->
+  <!-- CS1 (col 5) up to annotation -->
+  <line x1="150" y1="94" x2="150" y2="108" stroke="#8800cc" stroke-width="1.5" stroke-dasharray="3,2"/>
+  <!-- CS2 (col 13) -->
+  <line x1="310" y1="94" x2="310" y2="108" stroke="#8800cc" stroke-width="1.5" stroke-dasharray="3,2"/>
+  <!-- CS3 (col 21) -->
+  <line x1="470" y1="94" x2="470" y2="108" stroke="#8800cc" stroke-width="1.5" stroke-dasharray="3,2"/>
+
+  <!-- Orange wires: GPIO12/13/18 → protection resistors (from right side of board) -->
+  <!-- R_SSR output → east (exits breadboard) -->
+  <line x1="610" y1="300" x2="645" y2="300" stroke="#e07000" stroke-width="2"/>
+  <!-- R_SVO_A output → east -->
+  <line x1="590" y1="282" x2="645" y2="282" stroke="#e07000" stroke-width="2"/>
+  <!-- R_SVO_B output → east -->
+  <line x1="590" y1="264" x2="645" y2="264" stroke="#e07000" stroke-width="2"/>
+
+  <!-- ===================== RPi HEADER CALLOUT (right side) ===================== -->
+  <rect x="665" y="50" width="220" height="345" rx="6" fill="#1a1a2e" stroke="#1565c0" stroke-width="2"/>
+  <text x="775" y="68" text-anchor="middle" font-size="10" fill="white" font-weight="700">RPi 40-pin Header</text>
+  <text x="775" y="80" text-anchor="middle" font-size="8" fill="#7799cc">Connections to breadboard</text>
+
+  <!-- RPi pin rows -->
+  <g font-size="8" fill="white">
+    <text x="672" y="100">Pin  1 — 3.3V  →  top red rail</text>
+    <text x="672" y="113">Pin  9 — GND   →  top black rail</text>
+    <text x="672" y="128" fill="#cc88ff">Pin 24 — GPIO 8 (CE0)   →  A5  CS1</text>
+    <text x="672" y="141" fill="#cc88ff">Pin 26 — GPIO 7 (CE1)   →  A13 CS2</text>
+    <text x="672" y="154" fill="#cc88ff">Pin 22 — GPIO25 (SW CS) →  A21 CS3</text>
+    <text x="672" y="169" fill="#cc88ff">Pin 23 — GPIO11 (SCLK)  →  E6  CLK</text>
+    <text x="672" y="182" fill="#cc88ff">Pin 21 — GPIO 9 (MISO)  →  E4  DO</text>
+    <line x1="668" y1="190" x2="875" y2="190" stroke="#1565c0" stroke-width="0.75" stroke-dasharray="3,2"/>
+    <text x="672" y="204" fill="#ffaa44">Pin 32 — GPIO12 (PWM0)  →  A27 R_SSR in</text>
+    <text x="672" y="217" fill="#888">                   A28 R_SSR out → SSR sig+</text>
+    <text x="672" y="232" fill="#ffaa44">Pin 33 — GPIO13 (PWM1)  →  B26 R_SVO_A in</text>
+    <text x="672" y="245" fill="#888">                   B27 out → Servo A signal</text>
+    <text x="672" y="260" fill="#ffaa44">Pin 12 — GPIO18 (PWM0a) →  C26 R_SVO_B in</text>
+    <text x="672" y="273" fill="#888">                   C27 out → Servo B signal</text>
+    <line x1="668" y1="281" x2="875" y2="281" stroke="#1565c0" stroke-width="0.75" stroke-dasharray="3,2"/>
+    <text x="672" y="294" fill="#888">Pin 34 — GND → SSR signal−</text>
+    <text x="672" y="307" fill="#888">               (bottom GND rail)</text>
+  </g>
+
+  <!-- Callout arrows from breadboard to RPi box -->
+  <!-- Power (red) -->
+  <line x1="645" y1="62" x2="663" y2="95" stroke="#cc2222" stroke-width="1.5" marker-end="url(#arr)"/>
+  <!-- CS1 (purple) -->
+  <line x1="645" y1="300" x2="663" y2="296" stroke="#e07000" stroke-width="1.5"/>
+  <!-- SPI purple arrows -->
+  <line x1="645" y1="170" x2="663" y2="168" stroke="#8800cc" stroke-width="1.5"/>
+
+  <!-- Arrow marker -->
+  <defs>
+    <marker id="arr" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#cc2222"/>
+    </marker>
+  </defs>
+
+  <!-- ===================== LEGEND ===================== -->
+  <rect x="30" y="392" width="640" height="52" rx="4" fill="#f0f0ee" stroke="#ccc" stroke-width="1"/>
+  <text x="42" y="406" font-size="9" font-weight="700" fill="#1a1a2e">Wire colors</text>
+
+  <!-- Red -->
+  <line x1="100" y1="402" x2="125" y2="402" stroke="#cc2222" stroke-width="3"/>
+  <text x="128" y="406" font-size="8" fill="#333">Red = 3.3V power</text>
+
+  <!-- Black -->
+  <line x1="100" y1="416" x2="125" y2="416" stroke="#333" stroke-width="3"/>
+  <text x="128" y="420" font-size="8" fill="#333">Black = GND</text>
+
+  <!-- Purple solid = CLK -->
+  <line x1="230" y1="402" x2="255" y2="402" stroke="#8800cc" stroke-width="3"/>
+  <text x="258" y="406" font-size="8" fill="#333">Purple solid = CLK daisy-chain</text>
+
+  <!-- Purple dashed = MISO -->
+  <line x1="230" y1="416" x2="255" y2="416" stroke="#8800cc" stroke-width="3" stroke-dasharray="5,2"/>
+  <text x="258" y="420" font-size="8" fill="#333">Purple dashed = MISO daisy-chain</text>
+
+  <!-- Purple short = CS -->
+  <line x1="400" y1="402" x2="425" y2="402" stroke="#8800cc" stroke-width="1.5" stroke-dasharray="3,2"/>
+  <text x="428" y="406" font-size="8" fill="#333">Purple dotted = individual CS lines</text>
+
+  <!-- Orange -->
+  <line x1="400" y1="416" x2="425" y2="416" stroke="#e07000" stroke-width="3"/>
+  <text x="428" y="420" font-size="8" fill="#333">Orange = PWM signals (SSR + Servo)</text>
+
+  <!-- Yellow = caps -->
+  <rect x="575" y="396" width="10" height="10" rx="1" fill="#f5c842" stroke="#b8960c" stroke-width="1"/>
+  <text x="590" y="406" font-size="8" fill="#333">= Decoupling cap</text>
+  <rect x="575" y="410" width="10" height="10" rx="1" fill="#d4a843" stroke="#a07820" stroke-width="1"/>
+  <text x="590" y="420" font-size="8" fill="#333">= Pull-up / protection R</text>
+
+  <!-- TC module color swatch -->
+  <rect x="42" y="418" width="12" height="10" rx="1" fill="#006666" stroke="#004444" stroke-width="1"/>
+  <text x="57" y="427" font-size="8" fill="#333">= MAX31855 module (teal)</text>
+
+</svg>
