@@ -25,3 +25,5 @@ J_SERVO_B,3P 2.54mm header,Servo B connector (GND/VCC/Signal),HDR_1x3,1,DigiKey,
 —,Tower Pro SG90,9g micro servo (vent valve actuation),—,2,Amazon,—,3.50 ea,180° rotation version
 —,150W 120V cartridge heater,Heater element for thermal chamber,—,1,Omega/Amazon,—,15.00,Omega CIR-1012/120V or equiv.
 —,Bimetallic thermostat disc 120°C NC,Hardware overtemp cutout,—,1,Amazon,—,2.00,KSD301 120°C NC type
+—,Thermal cutoff fuse 150°C 10A axial,Passive last-resort heater protection — clips to heater body,—,3,DigiKey/Mouser,—,1.50 ea,Buy 3: install 1 keep 2 spares. Microtemp G4A15X or Bourns SF series. One-time non-resettable.
+—,Thermocouple transmitter K-type 0-10V DIN,PRODUCTION UPGRADE ONLY — converts TC signal for direct LOGO! AI input,DIN rail,1,Automation Direct / Autonics,—,25.00,NOT required for prototype. Add if you want hardware PLC temperature interlocks independent of RPi. Autonics MTH-D-VK or equiv.

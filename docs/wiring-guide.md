@@ -106,6 +106,23 @@ K-type convention: **yellow = positive (+), red = negative (−)** (US ANSI stan
 
 > **Cold junction:** The MAX31855 has an internal cold-junction compensator. Mount all four modules in the same thermal environment (same DIN sub-rail or common block) to minimise cold-junction error between channels.
 
+### Optional: Thermocouple transmitter for direct LOGO! PLC input
+
+For the prototype, all temperature readings go through the MAX31855 → RPi path. This is sufficient for software-controlled PID and monitoring.
+
+If you want the LOGO! PLC to **independently** read temperatures — for example to implement a hardware temperature interlock in ladder logic without relying on the RPi — you need a **thermocouple transmitter** (also called a TC signal conditioner). This converts the K-type thermocouple's millivolt signal into a 0–10V or 4–20 mA signal that the LOGO!'s analog inputs (AI1–AI4) can read directly.
+
+| Parameter   | Requirement                                                                 |
+|-------------|-----------------------------------------------------------------------------|
+| Input       | K-type thermocouple                                                         |
+| Output      | 0–10V DC or 4–20 mA (match LOGO! AI input range)                           |
+| Range       | 0–200°C minimum                                                             |
+| Form factor | DIN rail mount preferred (fits alongside LOGO! in enclosure)                |
+| Example     | Autonics MTH-D-VK (K-type, 0–10V out) ~$25 · or generic OMEGA TX93A ~$35  |
+| Qty         | 1 per thermocouple channel you want the PLC to read independently           |
+
+> **Prototype note:** Transmitters are NOT required for the first build. Add them later if you want hardware-enforced PLC temperature interlocks independent of RPi software. Flag them in the BOM as "production upgrade."
+
 ---
 
 ## RPi 4 → Heater SSR (GPIO 12)
@@ -119,11 +136,45 @@ The RPi GPIO12 drives the signal input of a Fotek SSR-40DA solid-state relay, wh
 
 **SSR load side (mains — by a qualified electrician):**
 
-| SSR Terminal | Connects to     | Notes                                                      |
-|--------------|-----------------|------------------------------------------------------------|
-| 1 (AC in)    | Mains Live (L)  | Through a 3A fuse inline with the heater circuit           |
-| 2 (AC out)   | Heater terminal | Cartridge heater or resistance heater element               |
-| Heater return| Mains Neutral (N)| Returns neutral directly — SSR switches the live side only |
+The complete mains circuit runs through four independent hardware protection layers in series. Each layer operates independently of software and independently of every other layer:
+
+```
+Mains Live (L)
+  │
+  ├──► [3A inline fuse]                     ← protects the branch circuit
+  │
+  ├──► [E-stop mushroom button, NC]          ← hardwired, bypasses all electronics
+  │
+  ├──► [LOGO! Q1 relay, NO contacts]        ← safety-gated by ladder logic
+  │
+  ├──► [Fotek SSR-40DA]                     ← controlled by RPi GPIO12 PWM
+  │
+  ├──► [Thermal cutoff fuse, 150°C, 10A]   ← clipped directly to heater body
+  │     (one-time, passive, no software)
+  │
+  └──► Heater element (150W, 120VAC)
+         │
+        Neutral (N)
+```
+
+| SSR Terminal | Connects to              | Notes                                                         |
+|--------------|--------------------------|---------------------------------------------------------------|
+| 1 (AC in)    | Mains Live (L)           | After 3A fuse, after E-stop, after Q1 relay contacts          |
+| 2 (AC out)   | Thermal fuse → Heater +  | Thermal fuse in series between SSR output and heater terminal |
+| Heater return| Mains Neutral (N)        | Returns neutral directly — SSR switches the live side only    |
+
+**Thermal cutoff fuse spec:**
+
+| Parameter    | Value                                                                      |
+|--------------|----------------------------------------------------------------------------|
+| Type         | Axial thermal cutoff (TCO) fuse — one-time, non-resettable                 |
+| Trip temp    | 150°C (gives ~30°C headroom above the 120°C bimetallic thermostat)         |
+| Current      | 10A rated (heater draws 1.25A — heavily derated for long life)             |
+| Mounting     | Clip or zip-tie directly to the heater cartridge body — must read element temp, NOT air temp |
+| Example part | Bourns SF-0603HIA150C-2 or Microtemp G4A15X (generic 150°C 10A axial)     |
+| Cost         | ~$1–2 each — keep 2–3 spares on hand                                       |
+
+> **Important:** A blown thermal fuse means something in the safety chain failed before it. Do not simply replace the fuse and restart — investigate why the element exceeded 150°C before running again.
 
 SSR spec: Fotek SSR-40DA (3–32V DC control, 24–480V AC load, 40A, zero-crossing).
 Heater: 150W 120VAC cartridge heater (e.g., Omega CIR-1012/120V or equivalent).
@@ -315,11 +366,13 @@ The rig interface board uses a standard full-size (830-point) solderless breadbo
 ## Safety Notes
 
 1. **Mains wiring:** all 120V AC wiring must be performed by or verified by a qualified electrician. Use appropriate wire gauge (14 AWG for 15A circuit, 16 AWG minimum for 10A sub-circuit), rated connectors, and conduit.
-2. **E-stop:** the E-stop is a physical hardware interlock wired directly into the LOGO! input. It also hardware-disables LOGO! outputs via the ladder rung. It is NOT just a software flag.
-3. **HW overtemp cutout:** the bimetallic thermostat disc (120°C trip) is wired as a physical hardware failsafe independent of the MAX31855 readings and software PID. Never bypass or remove it.
-4. **SSR heatsinking:** the Fotek SSR-40DA must be mounted on an aluminium heatsink (≥50 cm²) or the DIN rail enclosure wall. Without a heatsink it will overheat at sustained duty cycles.
-5. **Common GND:** all power rails (24V, 5V, 3.3V, SSR signal) must share a single common GND star point. Floating grounds cause measurement noise in the MAX31855 readings.
-6. **Servo signal protection:** the 100Ω series resistors on servo PWM lines limit current if a GPIO pin is accidentally set as input (no drive) — prevents the servo pulling the GPIO low.
+2. **Thermal cutoff fuse:** the 150°C thermal fuse is the last-resort passive protection against heater thermal runaway. It must be physically touching or clamped to the heater element body — not floating in air. It is one-time only: a blown fuse means a safety failure occurred upstream. Investigate before replacing.
+3. **E-stop:** the E-stop is a physical hardware interlock wired directly into the 120V heater circuit (in series, before the SSR) AND into the LOGO! input I1. Both layers operate independently. It is NOT a software flag.
+4. **HW overtemp cutout:** the bimetallic thermostat disc (120°C trip) wired to I3 is a physical hardware failsafe independent of MAX31855 readings and software PID. Never bypass or remove it.
+5. **Four-layer heater protection:** the heater has four independent hardware layers (inline fuse → E-stop → LOGO! Q1 relay → 150°C thermal fuse) plus the software PID cutout. All five must be functional before energising the heater for the first time.
+6. **SSR heatsinking:** the Fotek SSR-40DA must be mounted on an aluminium heatsink (≥50 cm²) or the DIN rail enclosure wall. Without a heatsink it will overheat at sustained duty cycles.
+7. **Common GND:** all power rails (24V, 5V, 3.3V, SSR signal) must share a single common GND star point. Floating grounds cause measurement noise in the MAX31855 readings.
+8. **Servo signal protection:** the 100Ω series resistors on servo PWM lines limit current if a GPIO pin is accidentally set as input — prevents the servo pulling the GPIO low.
 
 ---
 
