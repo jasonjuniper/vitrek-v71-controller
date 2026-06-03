@@ -1,0 +1,113 @@
+{
+  "_comment": "Thermal test rig hardware configuration. Edit to match your wiring.",
+
+  "plc": {
+    "host": "192.168.1.100",
+    "port": 502,
+    "model": "LOGO! 12/24RCE",
+    "auto_reconnect": true,
+    "reconnect_interval_s": 5
+  },
+
+  "thermocouples": {
+    "TC1_AMBIENT":  { "cs_pin": 8,  "type": "K", "description": "Ambient / chamber air",      "cal_offset_c": 0.0 },
+    "TC2_DUT":      { "cs_pin": 7,  "type": "K", "description": "DUT surface temperature",     "cal_offset_c": 0.0 },
+    "TC3_HEATER":   { "cs_pin": 25, "type": "K", "description": "Heater element surface",       "cal_offset_c": 0.0 },
+    "TC4_EXHAUST":  { "cs_pin": 24, "type": "K", "description": "Exhaust / vent outlet air",    "cal_offset_c": 0.0 }
+  },
+
+  "heater": {
+    "gpio_pin": 12,
+    "pwm_hz": 10,
+    "max_duty_pct": 90,
+    "ssr_model": "Fotek SSR-40DA",
+    "heater_wattage_w": 150,
+    "heater_voltage_v": 120
+  },
+
+  "servos": {
+    "vent_A": {
+      "gpio_pin": 13,
+      "pwm_hz": 50,
+      "min_pulse_us": 500,
+      "max_pulse_us": 2500,
+      "description": "Intake vent valve"
+    },
+    "vent_B": {
+      "gpio_pin": 18,
+      "pwm_hz": 50,
+      "min_pulse_us": 500,
+      "max_pulse_us": 2500,
+      "description": "Exhaust vent valve"
+    }
+  },
+
+  "plc_outputs": {
+    "Q1": { "name": "HEATER_RELAY",  "description": "SSR enable for heater circuit" },
+    "Q2": { "name": "VENT_RELAY",    "description": "24V power to servo/actuator rail" },
+    "Q3": { "name": "DUT_RELAY",     "description": "DUT power enable relay" },
+    "Q4": { "name": "ALARM_OUTPUT",  "description": "External alarm beacon" },
+    "Q5": { "name": "AUX_RELAY_1",   "description": "Spare" },
+    "Q6": { "name": "AUX_RELAY_2",   "description": "Spare" },
+    "Q7": { "name": "AUX_RELAY_3",   "description": "Spare" },
+    "Q8": { "name": "AUX_RELAY_4",   "description": "Spare" }
+  },
+
+  "plc_inputs": {
+    "I1": { "name": "ESTOP",           "type": "NC", "description": "E-stop mushroom button" },
+    "I2": { "name": "DOOR_INTERLOCK",  "type": "NC", "description": "Chamber door reed switch" },
+    "I3": { "name": "OVERTEMP_CUT",    "type": "NO", "description": "HW bimetallic thermostat disc (120°C trip)" },
+    "I4": { "name": "MANUAL_START",    "type": "NO", "description": "Green momentary start button" },
+    "I5": { "name": "MANUAL_STOP",     "type": "NC", "description": "Red momentary stop button" },
+    "I6": { "name": "SPARE_I6",        "type": "",   "description": "Spare digital input" },
+    "I7": { "name": "SPARE_I7",        "type": "",   "description": "Spare digital input" },
+    "I8": { "name": "SPARE_I8",        "type": "",   "description": "Spare digital input" }
+  },
+
+  "pid": {
+    "kp": 5.0,
+    "ki": 0.1,
+    "kd": 1.0,
+    "control_channel": "TC2_DUT",
+    "safety_max_c": 120.0
+  },
+
+  "test_profiles": {
+    "ambient_soak": {
+      "description": "10-minute ambient soak before any testing",
+      "setpoint_c": 25.0,
+      "duration_s": 600,
+      "vent_A_pct": 30,
+      "vent_B_pct": 30
+    },
+    "thermal_burn_in": {
+      "description": "85°C burn-in soak (JESD22-A108)",
+      "setpoint_c": 85.0,
+      "duration_s": 3600,
+      "vent_A_pct": 60,
+      "vent_B_pct": 60
+    },
+    "hi_temp_hipot": {
+      "description": "HiPot test at 70°C (elevated temperature production test)",
+      "setpoint_c": 70.0,
+      "duration_s": 300,
+      "vent_A_pct": 50,
+      "vent_B_pct": 50
+    }
+  },
+
+  "instruments": {
+    "hipot": {
+      "driver": "v71_driver",
+      "interface": "usb",
+      "vid": 4292,
+      "pid": 34869
+    },
+    "dc_load": {
+      "driver": "sdl1020x_driver",
+      "interface": "tcp",
+      "host": "192.168.1.101",
+      "port": 5025
+    }
+  }
+}

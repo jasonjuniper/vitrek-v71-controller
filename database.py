@@ -1,11 +1,13 @@
 """
 database.py
 -----------
-SQLite schema and CRUD operations for V71 test results.
+SQLite schema and CRUD operations for the Juniper Test Station.
 
 Schema:
-  test_sessions  – one row per test run (sequence-level)
-  test_steps     – one row per step result within a session
+  test_sessions  – one row per instrument test run (sequence-level)
+  test_steps     – one row per step result within a test session
+  sensor_log     – continuous 1-Hz sensor snapshots from the thermal rig
+                   (always recording, independent of instrument tests)
 """
 
 import sqlite3
@@ -48,6 +50,40 @@ CREATE TABLE IF NOT EXISTS test_steps (
 );
 """
 
+SENSOR_LOG_DDL = """
+CREATE TABLE IF NOT EXISTS sensor_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts              TEXT    NOT NULL,   -- ISO-8601 timestamp, 1-Hz cadence
+    instrument      TEXT,              -- active instrument at this moment
+    hipot_running   INTEGER,           -- 1 if HiPot test in progress
+    hipot_session   INTEGER,           -- foreign key to test_sessions.id (nullable)
+    -- Thermocouple readings (°C, NULL if sensor not connected)
+    tc1_c           REAL,              -- TC1: ambient / chamber air
+    tc2_c           REAL,              -- TC2: DUT surface
+    tc3_c           REAL,              -- TC3: heater element
+    tc4_c           REAL,              -- TC4: exhaust / vent outlet
+    -- Heater / PID state
+    heater_duty     REAL,              -- 0–100 % SSR duty cycle
+    setpoint_c      REAL,              -- PID target temperature
+    vent_a_pct      REAL,              -- Vent A position 0–100 %
+    vent_b_pct      REAL,              -- Vent B position 0–100 %
+    control_active  INTEGER,           -- 1 if PID loop running
+    thermal_fault   TEXT,              -- fault message if any
+    -- PLC I/O snapshot
+    plc_estop       INTEGER,           -- 1 = safe, 0 = E-stop tripped
+    plc_door        INTEGER,           -- 1 = door closed
+    plc_overtemp    INTEGER,           -- 1 = HW overtemp active
+    -- DC Load live measurements (NULL if dcload not active)
+    dcload_v        REAL,
+    dcload_a        REAL,
+    dcload_w        REAL,
+    dcload_ohm      REAL,
+    dcload_input_on INTEGER
+);
+CREATE INDEX IF NOT EXISTS sensor_log_ts ON sensor_log(ts);
+CREATE INDEX IF NOT EXISTS sensor_log_session ON sensor_log(hipot_session);
+"""
+
 
 def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
@@ -61,6 +97,57 @@ def init_db(db_path: str = DB_PATH) -> None:
     """Create tables if they don't exist."""
     with get_connection(db_path) as conn:
         conn.executescript(DDL)
+
+
+def ensure_sensor_log_table(db_path: str = DB_PATH) -> None:
+    """Create the sensor_log table (called by recorder thread on startup)."""
+    with get_connection(db_path) as conn:
+        conn.executescript(SENSOR_LOG_DDL)
+
+
+def log_sensor_snapshot(snap: dict, db_path: str = DB_PATH) -> None:
+    """Insert one sensor snapshot row from the continuous recorder."""
+    cols = [
+        "ts", "instrument", "hipot_running", "hipot_session",
+        "tc1_c", "tc2_c", "tc3_c", "tc4_c",
+        "heater_duty", "setpoint_c", "vent_a_pct", "vent_b_pct",
+        "control_active", "thermal_fault",
+        "plc_estop", "plc_door", "plc_overtemp",
+        "dcload_v", "dcload_a", "dcload_w", "dcload_ohm", "dcload_input_on",
+    ]
+    vals = [snap.get(c) for c in cols]
+    placeholders = ",".join("?" * len(cols))
+    with get_connection(db_path) as conn:
+        conn.execute(
+            f"INSERT INTO sensor_log ({','.join(cols)}) VALUES ({placeholders})",
+            vals
+        )
+
+
+def get_sensor_log(session_id: int = None, limit: int = 3600,
+                   db_path: str = DB_PATH) -> list[dict]:
+    """
+    Return recent sensor log rows.
+    If session_id given, returns rows spanning that test session.
+    Otherwise returns the most recent `limit` rows.
+    """
+    with get_connection(db_path) as conn:
+        if session_id:
+            # Get session time window
+            sess = conn.execute(
+                "SELECT started_at, finished_at FROM test_sessions WHERE id=?",
+                (session_id,)
+            ).fetchone()
+            if sess:
+                q = """SELECT * FROM sensor_log
+                       WHERE ts >= ? AND (ts <= ? OR ? IS NULL)
+                       ORDER BY ts"""
+                rows = conn.execute(q, (sess[0], sess[1], sess[1])).fetchall()
+                return [dict(r) for r in rows]
+        rows = conn.execute(
+            "SELECT * FROM sensor_log ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in reversed(rows)]
 
 
 def create_session(operator: str = "", part_number: str = "", serial_number: str = "",

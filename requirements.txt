@@ -1,3 +1,9 @@
 flask>=3.0
 openpyxl>=3.1
 pyserial>=3.5
+pymodbus>=3.0          # Siemens LOGO! PLC Modbus TCP
+# RPi only (install on RPi host, not dev machine):
+# RPi.GPIO>=0.7
+# adafruit-circuitpython-max31855>=2.3
+# adafruit-blinka>=8.0
+

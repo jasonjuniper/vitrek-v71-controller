@@ -1,0 +1,146 @@
+{
+  "_comment": "PCB definition for the Juniper Test Station rig interface board. Import into pcb-fab-pipeline.",
+  "name": "rig-interface",
+  "revision": "1.0",
+  "description": "RPi 4 rig interface: 4× MAX31855 thermocouple amplifiers, SSR output, 2× servo headers, LOGO! LAN connector, DUT relay interface. Laser-engrave on fiber laser from this definition.",
+
+  "board_size_mm": [80, 60],
+  "copper_layers": 2,
+  "substrate": "FR-4 1.6mm 1oz Cu",
+
+  "nets": [
+    { "name": "VCC_3V3",   "color": "red",    "description": "+3.3V from RPi pin 1" },
+    { "name": "VCC_5V",    "color": "red",    "description": "+5V from RPi pin 2 (servo power)" },
+    { "name": "GND",       "color": "black",  "description": "Common ground" },
+    { "name": "SPI_CLK",   "color": "purple", "description": "SPI0 clock — RPi GPIO11" },
+    { "name": "SPI_MISO",  "color": "purple", "description": "SPI0 MISO — RPi GPIO9" },
+    { "name": "TC1_CS",    "color": "purple", "description": "MAX31855 #1 CS — RPi GPIO8" },
+    { "name": "TC2_CS",    "color": "purple", "description": "MAX31855 #2 CS — RPi GPIO7" },
+    { "name": "TC3_CS",    "color": "purple", "description": "MAX31855 #3 CS — RPi GPIO25" },
+    { "name": "TC4_CS",    "color": "purple", "description": "MAX31855 #4 CS — RPi GPIO24" },
+    { "name": "SSR_PWM",   "color": "orange", "description": "Heater SSR control — RPi GPIO12" },
+    { "name": "SERVO_A",   "color": "orange", "description": "Vent valve A PWM — RPi GPIO13" },
+    { "name": "SERVO_B",   "color": "orange", "description": "Vent valve B PWM — RPi GPIO18" }
+  ],
+
+  "components": [
+    {
+      "refdes": "U1", "value": "MAX31855KASA+", "footprint": "SOIC-8",
+      "description": "Thermocouple amp TC1 (ambient)",
+      "nets": { "1": "TC1_CS", "2": "SPI_CLK", "3": "SPI_MISO", "4": "GND", "5": "GND", "6": "GND", "7": "GND", "8": "VCC_3V3" }
+    },
+    {
+      "refdes": "U2", "value": "MAX31855KASA+", "footprint": "SOIC-8",
+      "description": "Thermocouple amp TC2 (DUT surface)",
+      "nets": { "1": "TC2_CS", "2": "SPI_CLK", "3": "SPI_MISO", "4": "GND", "5": "GND", "6": "GND", "7": "GND", "8": "VCC_3V3" }
+    },
+    {
+      "refdes": "U3", "value": "MAX31855KASA+", "footprint": "SOIC-8",
+      "description": "Thermocouple amp TC3 (heater element)",
+      "nets": { "1": "TC3_CS", "2": "SPI_CLK", "3": "SPI_MISO", "4": "GND", "5": "GND", "6": "GND", "7": "GND", "8": "VCC_3V3" }
+    },
+    {
+      "refdes": "U4", "value": "MAX31855KASA+", "footprint": "SOIC-8",
+      "description": "Thermocouple amp TC4 (exhaust/vent)",
+      "nets": { "1": "TC4_CS", "2": "SPI_CLK", "3": "SPI_MISO", "4": "GND", "5": "GND", "6": "GND", "7": "GND", "8": "VCC_3V3" }
+    },
+    {
+      "refdes": "R1", "value": "100Ω 1/4W", "footprint": "0805",
+      "description": "SSR signal series protection resistor",
+      "nets": { "1": "SSR_PWM", "2": "J_SSR.signal" }
+    },
+    {
+      "refdes": "R2", "value": "100Ω 1/4W", "footprint": "0805",
+      "description": "Servo A signal protection resistor",
+      "nets": { "1": "SERVO_A", "2": "J_SERVO_A.signal" }
+    },
+    {
+      "refdes": "R3", "value": "100Ω 1/4W", "footprint": "0805",
+      "description": "Servo B signal protection resistor",
+      "nets": { "1": "SERVO_B", "2": "J_SERVO_B.signal" }
+    },
+    {
+      "refdes": "C1", "value": "100nF X7R 0805", "footprint": "0805",
+      "description": "U1 VCC bypass",
+      "nets": { "1": "VCC_3V3", "2": "GND" }
+    },
+    {
+      "refdes": "C2", "value": "100nF X7R 0805", "footprint": "0805",
+      "description": "U2 VCC bypass",
+      "nets": { "1": "VCC_3V3", "2": "GND" }
+    },
+    {
+      "refdes": "C3", "value": "100nF X7R 0805", "footprint": "0805",
+      "description": "U3 VCC bypass",
+      "nets": { "1": "VCC_3V3", "2": "GND" }
+    },
+    {
+      "refdes": "C4", "value": "100nF X7R 0805", "footprint": "0805",
+      "description": "U4 VCC bypass",
+      "nets": { "1": "VCC_3V3", "2": "GND" }
+    },
+    {
+      "refdes": "C5", "value": "10µF 25V ELEC", "footprint": "RADIAL-D5L11",
+      "description": "Bulk VCC_3V3 decoupling",
+      "nets": { "1(+)": "VCC_3V3", "2(-)": "GND" }
+    },
+    {
+      "refdes": "J_RPI", "value": "2×20 2.54mm female header", "footprint": "HDR_2x20",
+      "description": "RPi 40-pin GPIO connector — mounts directly onto RPi header or via ribbon cable",
+      "nets": {
+        "pin1":  "VCC_3V3", "pin2":  "VCC_5V",  "pin6":  "GND",
+        "pin9":  "GND",     "pin17": "VCC_3V3",  "pin18": "SERVO_B",
+        "pin19": "GND",     "pin21": "SPI_MISO", "pin22": "TC3_CS",
+        "pin23": "SPI_CLK", "pin24": "TC1_CS",   "pin25": "GND",
+        "pin26": "TC2_CS",  "pin32": "SSR_PWM",  "pin33": "SERVO_A",
+        "pin34": "GND",     "pin36": "TC4_CS"
+      },
+      "_note": "Pin 36 = GPIO16 if TC4 CS is remapped; or add a solder bridge for GPIO24 vs GPIO16. See wiring guide."
+    },
+    {
+      "refdes": "J_TC1", "value": "2-pin screw terminal 3.5mm", "footprint": "SCREW_2P_3.5",
+      "description": "TC1 thermocouple input terminals",
+      "nets": { "1": "TC1_IN+", "2": "TC1_IN-" }
+    },
+    {
+      "refdes": "J_TC2", "value": "2-pin screw terminal 3.5mm", "footprint": "SCREW_2P_3.5",
+      "description": "TC2 thermocouple input terminals",
+      "nets": { "1": "TC2_IN+", "2": "TC2_IN-" }
+    },
+    {
+      "refdes": "J_TC3", "value": "2-pin screw terminal 3.5mm", "footprint": "SCREW_2P_3.5",
+      "description": "TC3 thermocouple input terminals",
+      "nets": { "1": "TC3_IN+", "2": "TC3_IN-" }
+    },
+    {
+      "refdes": "J_TC4", "value": "2-pin screw terminal 3.5mm", "footprint": "SCREW_2P_3.5",
+      "description": "TC4 thermocouple input terminals",
+      "nets": { "1": "TC4_IN+", "2": "TC4_IN-" }
+    },
+    {
+      "refdes": "J_SSR", "value": "2-pin screw terminal 3.5mm", "footprint": "SCREW_2P_3.5",
+      "description": "SSR control output (+signal, −GND)",
+      "nets": { "1": "J_SSR.signal", "2": "GND" }
+    },
+    {
+      "refdes": "J_SERVO_A", "value": "3-pin 2.54mm header (PWM servo connector)", "footprint": "HDR_1x3",
+      "description": "Servo A (vent intake) — GND/VCC/Signal",
+      "nets": { "1": "GND", "2": "VCC_5V", "3": "J_SERVO_A.signal" }
+    },
+    {
+      "refdes": "J_SERVO_B", "value": "3-pin 2.54mm header (PWM servo connector)", "footprint": "HDR_1x3",
+      "description": "Servo B (vent exhaust) — GND/VCC/Signal",
+      "nets": { "1": "GND", "2": "VCC_5V", "3": "J_SERVO_B.signal" }
+    }
+  ],
+
+  "fab_notes": [
+    "Route VCC_3V3 and GND as poured fills (polygon fills) on bottom copper to minimise thermal noise into MAX31855 circuits.",
+    "Place all four MAX31855 (U1–U4) in a row along the top of the board, with TC screw terminals immediately adjacent.",
+    "Keep J_RPI connector flush to one edge for RPi HAT-style mounting.",
+    "SSR and servo connectors face the opposite edge from J_RPI.",
+    "Min trace width: 0.3mm signal, 0.5mm power. Clearance ≥0.2mm (in-house fiber laser limit).",
+    "All TC thermocouple inputs route directly to MAX31855 pins T+ / T− only — no trace length constraints but keep symmetric.",
+    "Add silkscreen labels on TC1–TC4 terminals: TC1=AMBIENT, TC2=DUT, TC3=HEATER, TC4=EXHAUST."
+  ]
+}

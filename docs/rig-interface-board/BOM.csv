@@ -1,0 +1,27 @@
+Refdes,Value,Description,Footprint,Qty,Vendor,Vendor PN,Approx USD,Notes
+U1,MAX31855KASA+,K-type thermocouple amplifier SPI SOIC-8 (TC1 Ambient),SOIC-8,1,DigiKey,MAX31855KASA+T-ND,3.50,
+U2,MAX31855KASA+,K-type thermocouple amplifier SPI SOIC-8 (TC2 DUT),SOIC-8,1,DigiKey,MAX31855KASA+T-ND,3.50,
+U3,MAX31855KASA+,K-type thermocouple amplifier SPI SOIC-8 (TC3 Heater),SOIC-8,1,DigiKey,MAX31855KASA+T-ND,3.50,
+U4,MAX31855KASA+,K-type thermocouple amplifier SPI SOIC-8 (TC4 Exhaust),SOIC-8,1,DigiKey,MAX31855KASA+T-ND,3.50,
+R1,100Ω 1/4W 1%,SSR signal protection resistor,0805,1,DigiKey,RMCF0805FT100RCT-ND,0.10,
+R2,100Ω 1/4W 1%,Servo A signal protection resistor,0805,1,DigiKey,RMCF0805FT100RCT-ND,0.10,
+R3,100Ω 1/4W 1%,Servo B signal protection resistor,0805,1,DigiKey,RMCF0805FT100RCT-ND,0.10,
+C1,100nF X7R 0805,U1 VCC bypass cap,0805,1,DigiKey,311-1157-1-ND,0.10,
+C2,100nF X7R 0805,U2 VCC bypass cap,0805,1,DigiKey,311-1157-1-ND,0.10,
+C3,100nF X7R 0805,U3 VCC bypass cap,0805,1,DigiKey,311-1157-1-ND,0.10,
+C4,100nF X7R 0805,U4 VCC bypass cap,0805,1,DigiKey,311-1157-1-ND,0.10,
+C5,10µF 25V electrolytic,Bulk VCC_3V3 decoupling,RADIAL-D5L11,1,DigiKey,P5172-ND,0.25,Observe polarity
+J_RPI,2×20 2.54mm female header,RPi 40-pin GPIO header,HDR_2x20,1,DigiKey,S7052-ND,1.50,Extra-tall stacking for HAT use
+J_TC1,2P 3.5mm screw terminal,TC1 thermocouple input,SCREW_2P_3.5,1,DigiKey,A98402-ND,0.40,
+J_TC2,2P 3.5mm screw terminal,TC2 thermocouple input,SCREW_2P_3.5,1,DigiKey,A98402-ND,0.40,
+J_TC3,2P 3.5mm screw terminal,TC3 thermocouple input,SCREW_2P_3.5,1,DigiKey,A98402-ND,0.40,
+J_TC4,2P 3.5mm screw terminal,TC4 thermocouple input,SCREW_2P_3.5,1,DigiKey,A98402-ND,0.40,
+J_SSR,2P 3.5mm screw terminal,SSR signal output (+/−),SCREW_2P_3.5,1,DigiKey,A98402-ND,0.40,
+J_SERVO_A,3P 2.54mm header,Servo A connector (GND/VCC/Signal),HDR_1x3,1,DigiKey,S1011EC-03-ND,0.30,
+J_SERVO_B,3P 2.54mm header,Servo B connector (GND/VCC/Signal),HDR_1x3,1,DigiKey,S1011EC-03-ND,0.30,
+—,FR-4 80×60mm blank,PCB substrate 1.6mm 1oz Cu single-sided,—,1,Amazon/Aliexpress,—,1.50,Cut from 100×150mm panel
+—,K-type thermocouple 1m,TC probe for chamber use (all four channels),—,4,Amazon,—,3.00 ea,Glass-fiber insulated for >100°C use
+—,Fotek SSR-40DA,Solid state relay 40A AC (heater switching),DIN/panel,1,Amazon,—,8.00,Mount on heatsink; see wiring guide
+—,Tower Pro SG90,9g micro servo (vent valve actuation),—,2,Amazon,—,3.50 ea,180° rotation version
+—,150W 120V cartridge heater,Heater element for thermal chamber,—,1,Omega/Amazon,—,15.00,Omega CIR-1012/120V or equiv.
+—,Bimetallic thermostat disc 120°C NC,Hardware overtemp cutout,—,1,Amazon,—,2.00,KSD301 120°C NC type
