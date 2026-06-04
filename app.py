@@ -970,6 +970,19 @@ button:disabled{opacity:.45;cursor:default;}
 </nav>
 """
 
+def _render_head(title: str, tab_home: str = "", tab_hipot: str = "",
+                 tab_dcload: str = "", tab_thermal: str = "") -> str:
+    """Substitute named slots in _HTML_HEAD without Python % formatting.
+    Using .replace() avoids TypeError from CSS percentage values like width:100%.
+    """
+    return (_HTML_HEAD
+            .replace("%(title)s",    title)
+            .replace("%(tab_home)s",    tab_home)
+            .replace("%(tab_hipot)s",   tab_hipot)
+            .replace("%(tab_dcload)s",  tab_dcload)
+            .replace("%(tab_thermal)s", tab_thermal))
+
+
 _HTML_FOOT = r"""
 <footer class="juniper-footer">Designed and built by <a href="https://juniperdesign.com" target="_blank" rel="noopener">Juniper Design</a></footer>
 <script src="/static/js/juniper-theme.js"></script>
@@ -998,10 +1011,7 @@ _HTML_FOOT = r"""
 
 
 # ── Landing page ───────────────────────────────────────────────────────────────
-_LANDING_HTML = _HTML_HEAD % dict(
-    title="Station Home",
-    tab_home="active", tab_hipot="", tab_dcload="", tab_thermal=""
-) + r"""
+_LANDING_HTML = _render_head("Station Home", tab_home="active") + r"""
 <main class="app-main">
   <div style="max-width:860px;margin:0 auto;">
     <div class="card" style="text-align:center;padding:32px 24px;">
@@ -1062,10 +1072,7 @@ _LANDING_HTML = _HTML_HEAD % dict(
 
 
 # ── HiPot page ─────────────────────────────────────────────────────────────────
-_HIPOT_HTML = _HTML_HEAD % dict(
-    title="HiPot — V71",
-    tab_home="", tab_hipot="active", tab_dcload="", tab_thermal=""
-) + r"""
+_HIPOT_HTML = _render_head("HiPot — V71", tab_hipot="active") + r"""
 <main class="app-main">
   <div class="layout-2col">
     <div class="col-left">
@@ -1218,10 +1225,7 @@ setInterval(async()=>{if(!_running){const j=await(await fetch('/api/hipot/status
 
 
 # ── DC Load page ───────────────────────────────────────────────────────────────
-_DCLOAD_HTML = _HTML_HEAD % dict(
-    title="DC Load — SDL1020X",
-    tab_home="", tab_hipot="", tab_dcload="active", tab_thermal=""
-) + r"""
+_DCLOAD_HTML = _render_head("DC Load — SDL1020X", tab_dcload="active") + r"""
 <main class="app-main">
   <div class="layout-2col">
     <div class="col-left">
@@ -1328,10 +1332,7 @@ function showMsg(id,txt,type){document.getElementById(id).innerHTML=`<div class=
 
 
 # ── Thermal rig page ───────────────────────────────────────────────────────────
-_THERMAL_HTML = _HTML_HEAD % dict(
-    title="Thermal Rig",
-    tab_home="", tab_hipot="", tab_dcload="", tab_thermal="active"
-) + r"""
+_THERMAL_HTML = _render_head("Thermal Rig", tab_thermal="active") + r"""
 <main class="app-main">
   <div class="layout-2col">
     <div class="col-left">
