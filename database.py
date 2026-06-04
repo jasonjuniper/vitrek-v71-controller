@@ -106,6 +106,23 @@ CREATE INDEX IF NOT EXISTS thermal_tests_result  ON thermal_tests(result);
 """
 
 
+
+BATTERY_RUNS_DDL = """
+CREATE TABLE IF NOT EXISTS battery_runs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    battery_id      TEXT    NOT NULL,
+    battery_name    TEXT,
+    started_at      TEXT    NOT NULL,
+    finished_at     TEXT,
+    operator        TEXT,
+    dut_id          TEXT,
+    overall_pass    INTEGER,
+    steps_json      TEXT,
+    readings_json   TEXT
+);
+CREATE INDEX IF NOT EXISTS battery_runs_battery ON battery_runs(battery_id);
+"""
+
 def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -125,6 +142,26 @@ def ensure_sensor_log_table(db_path: str = DB_PATH) -> None:
     with get_connection(db_path) as conn:
         conn.executescript(SENSOR_LOG_DDL)
         conn.executescript(THERMAL_TESTS_DDL)
+        conn.executescript(BATTERY_RUNS_DDL)
+
+
+def get_battery_runs(limit: int = 100, db_path: str = DB_PATH) -> list[dict]:
+    """Return most-recent test battery run results."""
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id,battery_id,battery_name,started_at,finished_at,operator,dut_id,overall_pass FROM battery_runs ORDER BY id DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_battery_run(run_id: int, db_path: str = DB_PATH) -> Optional[dict]:
+    """Return a single battery run including full JSON data."""
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM battery_runs WHERE id=?", (run_id,)
+        ).fetchone()
+        return dict(row) if row else None
 
 
 def get_thermal_tests(limit: int = 100, db_path: str = DB_PATH) -> list[dict]:

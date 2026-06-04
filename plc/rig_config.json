@@ -220,6 +220,70 @@
     ]
   },
 
+  "test_batteries": {
+    "_comment": "Automated multi-step DC load test sequences. duration_s per step; steady_state overrides duration and runs until thermal equilibrium instead.",
+    "_note_efficiency": "True DOE Level VI efficiency requires input-side AC power measurement. These steps measure output voltage regulation and output power at each load point. Add an AC power meter for full efficiency curves.",
+
+    "doe_level_vi_pec0063": {
+      "name": "DOE Level VI — PEC-0063 65W",
+      "description": "Output voltage regulation sweep per DOE 10 CFR 430 Subpart B Appendix Z. 10 min per load point (5 min stabilise + 5 min measure). Rated output: 20V / 3.25A / 65W.",
+      "nom_voltage_v": 20.0,
+      "rated_current_a": 3.25,
+      "pass_voltage_tolerance_pct": 5.0,
+      "steps": [
+        {"id": 1, "name": "No load",   "mode": "CC", "setpoint": 0.000, "unit": "A", "duration_s": 600,  "pct_load": 0},
+        {"id": 2, "name": "25% load",  "mode": "CC", "setpoint": 0.813, "unit": "A", "duration_s": 600,  "pct_load": 25},
+        {"id": 3, "name": "50% load",  "mode": "CC", "setpoint": 1.625, "unit": "A", "duration_s": 600,  "pct_load": 50},
+        {"id": 4, "name": "75% load",  "mode": "CC", "setpoint": 2.438, "unit": "A", "duration_s": 600,  "pct_load": 75},
+        {"id": 5, "name": "100% load", "mode": "CC", "setpoint": 3.250, "unit": "A", "duration_s": 600,  "pct_load": 100}
+      ]
+    },
+
+    "ul1310_thermal_pec0063": {
+      "name": "UL 1310 Thermal Soak — PEC-0063 65W",
+      "description": "Rated load applied until thermal steady state (ΔT < 2°C over any 30-min window). Maximum 4 hours per UL 1310. Correlates with thermocouple data from the rig.",
+      "nom_voltage_v": 20.0,
+      "rated_current_a": 3.25,
+      "pass_voltage_tolerance_pct": 5.0,
+      "steps": [
+        {"id": 1, "name": "Rated load thermal soak", "mode": "CC", "setpoint": 3.250, "unit": "A",
+         "steady_state": true, "steady_state_tolerance_c": 2.0, "steady_state_window_s": 1800,
+         "duration_s": 14400, "pct_load": 100}
+      ]
+    },
+
+    "ul1310_overload_pec0063": {
+      "name": "UL 1310 DSR Overload — PEC-0063 66W",
+      "description": "66W CP overload soak per PEC-0063 DSR (Juniper thermal design review 10/7/2025). Runs to thermal steady state, max 4 hours.",
+      "nom_voltage_v": 20.0,
+      "rated_current_a": 3.25,
+      "pass_voltage_tolerance_pct": 5.0,
+      "steps": [
+        {"id": 1, "name": "66W overload soak", "mode": "CP", "setpoint": 66.0, "unit": "W",
+         "steady_state": true, "steady_state_tolerance_c": 2.0, "steady_state_window_s": 1800,
+         "duration_s": 14400, "pct_load": 102}
+      ]
+    },
+
+    "full_compliance_pec0063": {
+      "name": "Full Compliance Battery — PEC-0063",
+      "description": "DOE Level VI regulation sweep (50 min) followed by UL 1310 rated-load thermal soak (up to 4 hrs). Run end-to-end for a complete compliance dataset.",
+      "nom_voltage_v": 20.0,
+      "rated_current_a": 3.25,
+      "pass_voltage_tolerance_pct": 5.0,
+      "steps": [
+        {"id": 1, "name": "No load",          "mode": "CC", "setpoint": 0.000, "unit": "A", "duration_s": 600,   "pct_load": 0},
+        {"id": 2, "name": "25% load",         "mode": "CC", "setpoint": 0.813, "unit": "A", "duration_s": 600,   "pct_load": 25},
+        {"id": 3, "name": "50% load",         "mode": "CC", "setpoint": 1.625, "unit": "A", "duration_s": 600,   "pct_load": 50},
+        {"id": 4, "name": "75% load",         "mode": "CC", "setpoint": 2.438, "unit": "A", "duration_s": 600,   "pct_load": 75},
+        {"id": 5, "name": "100% — DOE point", "mode": "CC", "setpoint": 3.250, "unit": "A", "duration_s": 600,   "pct_load": 100},
+        {"id": 6, "name": "UL 1310 thermal soak", "mode": "CC", "setpoint": 3.250, "unit": "A",
+         "steady_state": true, "steady_state_tolerance_c": 2.0, "steady_state_window_s": 1800,
+         "duration_s": 14400, "pct_load": 100}
+      ]
+    }
+  },
+
   "instruments": {
     "hipot": {
       "driver": "v71_driver",

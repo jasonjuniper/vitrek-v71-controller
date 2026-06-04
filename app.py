@@ -76,6 +76,7 @@ from flask import (Flask, jsonify, request, send_file,
 import database as db
 from excel_export import export_to_excel
 from pec0063_test import PEC0063Test, evaluate_ul
+from test_battery import TestBattery, _load_batteries
 
 # Drivers — loaded lazily so the app starts even without hardware
 try:
@@ -132,7 +133,10 @@ _hipot_step_types: list[str]  = []
 _hipot_run_thread: threading.Thread | None = None
 
 # PEC-0063 thermal qualification test
-_pec0063_test = None   # PEC0063Test instance when running
+_pec0063_test = None
+
+# Test battery runner
+_battery_test = None   # PEC0063Test instance when running
 
 # Continuous sensor recorder
 _recorder_thread: threading.Thread | None = None
@@ -747,6 +751,84 @@ def api_session(session_id):
         return jsonify({"ok": False, "error": "Not found"}), 404
     return jsonify({"ok": True, "session": session, "steps": db.get_steps(session_id)})
 
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TEST BATTERY
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/battery/list")
+def api_battery_list():
+    """Return available test battery configurations."""
+    try:
+        batteries = _load_batteries()
+        result = {}
+        for bid, bcfg in batteries.items():
+            if bid.startswith('_'):
+                continue
+            steps = bcfg.get("steps", [])
+            total_s = sum(s.get("duration_s", 0) for s in steps)
+            result[bid] = {
+                "name":        bcfg["name"],
+                "description": bcfg.get("description", ""),
+                "steps":       len(steps),
+                "est_min":     round(total_s / 60),
+            }
+        return jsonify({"ok": True, "batteries": result})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/battery/start", methods=["POST"])
+def api_battery_start():
+    global _battery_test
+    if not _dcload or not _dcload.connected:
+        return jsonify({"ok": False, "error": "DC Load not connected"}), 400
+    d = request.get_json(force=True)
+    battery_id = d.get("battery_id", "full_compliance_pec0063")
+    meta = {"operator": d.get("operator", ""), "dut": d.get("dut", "")}
+    if _battery_test and _battery_test.state == "running":
+        return jsonify({"ok": False, "error": "A battery test is already running"}), 400
+    try:
+        conn = db.get_connection()
+        _battery_test = TestBattery(
+            dc_load=_dcload, thermal=_thermal, db=conn,
+            battery_id=battery_id, metadata=meta
+        )
+        _battery_test.start()
+        return jsonify({"ok": True, "battery_id": battery_id})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/battery/status")
+def api_battery_status():
+    if not _battery_test:
+        return jsonify({"ok": True, "state": "idle"})
+    return jsonify({"ok": True, **_battery_test.get_status()})
+
+
+@app.route("/api/battery/stop", methods=["POST"])
+def api_battery_stop():
+    if not _battery_test or _battery_test.state not in ("running",):
+        return jsonify({"ok": False, "error": "No battery test running"}), 400
+    _battery_test.stop()
+    return jsonify({"ok": True, "state": _battery_test.state})
+
+
+@app.route("/api/battery/results")
+def api_battery_results():
+    db.ensure_sensor_log_table()
+    rows = db.get_battery_runs(limit=int(request.args.get("limit", 100)))
+    return jsonify({"ok": True, "runs": rows, "count": len(rows)})
+
+
+@app.route("/api/battery/result/<int:run_id>")
+def api_battery_result(run_id):
+    run = db.get_battery_run(run_id)
+    if not run:
+        return jsonify({"ok": False, "error": "Not found"}), 404
+    return jsonify({"ok": True, "run": run})
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PEC-0063 THERMAL QUALIFICATION
