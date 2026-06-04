@@ -63,9 +63,10 @@ class SDL1020XDriver:
 
     def __init__(self):
         self._lock   = threading.Lock()
-        self._mode: Optional[str] = None   # "tcp" or "serial"
+        self._mode: Optional[str] = None   # "tcp", "serial", or "visa"
         self._sock: Optional[socket.socket] = None
         self._serial = None
+        self._visa_inst = None
         self._recv_buf = b""
 
     # ------------------------------------------------------------------
@@ -95,6 +96,59 @@ class SDL1020XDriver:
         self._mode = "serial"
         self._flush()
 
+    def connect_visa(self, resource: str = "") -> None:
+        """
+        Connect to SDL via USB-VISA (USBTMC) using NI-VISA or compatible backend.
+        If resource is empty, auto-selects the first Siglent USBTMC instrument found.
+        Requires: pip install pyvisa
+        """
+        try:
+            import pyvisa
+        except ImportError:
+            raise SDL1020XError(
+                "pyvisa is not installed. Run: pip install pyvisa --break-system-packages"
+            )
+        rm = pyvisa.ResourceManager()
+        if not resource:
+            # Auto-select: look for Siglent VID 0xF4EC
+            for r in rm.list_resources():
+                if "F4EC" in r.upper() or "SIGLENT" in r.upper():
+                    resource = r
+                    break
+            if not resource:
+                # Fall back to first USB INSTR
+                usb = [r for r in rm.list_resources() if "USB" in r.upper()]
+                if usb:
+                    resource = usb[0]
+                else:
+                    raise SDL1020XError(
+                        "No VISA/USBTMC instruments found. "
+                        "Check NI-VISA is installed and the SDL is connected."
+                    )
+        try:
+            inst = rm.open_resource(resource)
+            inst.timeout = 5000   # 5 s
+            inst.read_termination  = "\n"
+            inst.write_termination = "\n"
+        except Exception as e:
+            raise SDL1020XError(f"VISA open failed for '{resource}': {e}") from e
+        self._visa_inst = inst
+        self._mode = "visa"
+        self._flush()
+
+    @staticmethod
+    def list_visa_resources() -> list[dict]:
+        """Return available VISA instrument resource strings."""
+        try:
+            import pyvisa
+            rm = pyvisa.ResourceManager()
+            out = []
+            for r in rm.list_resources():
+                out.append({"resource": r, "is_usbtmc": "USB" in r.upper()})
+            return out
+        except Exception as e:
+            return [{"resource": str(e), "is_usbtmc": False, "error": True}]
+
     def disconnect(self) -> None:
         with self._lock:
             if self._sock:
@@ -109,6 +163,12 @@ class SDL1020XDriver:
                 except Exception:
                     pass
                 self._serial = None
+            if self._visa_inst:
+                try:
+                    self._visa_inst.close()
+                except Exception:
+                    pass
+                self._visa_inst = None
             self._mode = None
 
     @property
@@ -125,6 +185,8 @@ class SDL1020XDriver:
             self._sock.sendall(data)
         elif self._mode == "serial":
             self._serial.write(data)
+        elif self._mode == "visa":
+            self._visa_inst.write(cmd.strip())
         else:
             raise SDL1020XError("Not connected.")
 

@@ -379,8 +379,10 @@ def api_instrument_connect():
                 if mode == "tcp":
                     drv.connect_tcp(d.get("host", "192.168.1.101"),
                                     int(d.get("port", 5025)))
+                elif mode == "visa":
+                    drv.connect_visa(d.get("visa_resource", ""))
                 else:
-                    drv.connect_serial(d.get("port", "COM5"))
+                    drv.connect_serial(d.get("port_serial", d.get("port", "COM5")))
                 _dcload = drv
                 _active_instrument = "dcload"
                 idn = drv.identify()
@@ -560,6 +562,16 @@ def api_hipot_live():
 # ═══════════════════════════════════════════════════════════════════════════════
 # DC LOAD API
 # ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/dcload/visa_resources")
+def api_dcload_visa_resources():
+    """Return available VISA/USBTMC instrument resources."""
+    try:
+        resources = SDL1020XDriver.list_visa_resources() if SDL_AVAILABLE else []
+        return jsonify({"ok": True, "resources": resources})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "resources": []})
+
 
 @app.route("/api/dcload/ports")
 def api_dcload_ports():
@@ -1340,11 +1352,20 @@ _DCLOAD_HTML = _render_head("DC Load — SDL1020X", tab_dcload="active") + r"""
         <label>Interface</label>
         <select id="dl-iface" onchange="dlIfaceChange()">
           <option value="tcp">LAN / TCP (recommended)</option>
+          <option value="visa">USB-VISA / USBTMC (NI-VISA)</option>
           <option value="serial">USB CDC / COM Port</option>
         </select>
         <div id="dl-tcp-opts">
           <label>Host IP</label><input id="dl-host" value="192.168.1.101">
           <label>Port</label><input id="dl-port" value="5025">
+        </div>
+        <div id="dl-visa-opts" style="display:none">
+          <label style="display:flex;align-items:center;justify-content:space-between;">
+            VISA Resource
+            <button class="btn-muted" style="padding:2px 8px;font-size:.72rem;margin:0;" onclick="dlRefreshVisa()">&#8635; Scan</button>
+          </label>
+          <select id="dl-visa-res" style="font-family:monospace;font-size:.82rem;"></select>
+          <div id="dl-visa-msg" style="font-size:.72rem;color:var(--text-muted);margin-top:3px;"></div>
         </div>
         <div id="dl-serial-opts" style="display:none">
           <label style="display:flex;align-items:center;justify-content:space-between;">
@@ -1437,10 +1458,31 @@ document.getElementById('dl-mode').addEventListener('change',e=>{
   document.getElementById('dl-val-label').textContent=labels[e.target.value]||'Value';
 });
 function dlIfaceChange(){
-  const serial=document.getElementById('dl-iface').value==='serial';
-  document.getElementById('dl-tcp-opts').style.display=serial?'none':'';
-  document.getElementById('dl-serial-opts').style.display=serial?'':'none';
-  if(serial) dlRefreshPorts();
+  const val=document.getElementById('dl-iface').value;
+  document.getElementById('dl-tcp-opts').style.display=val==='tcp'?'':'none';
+  document.getElementById('dl-visa-opts').style.display=val==='visa'?'':'none';
+  document.getElementById('dl-serial-opts').style.display=val==='serial'?'':'none';
+  if(val==='serial') dlRefreshPorts();
+  if(val==='visa') dlRefreshVisa();
+}
+async function dlRefreshVisa(){
+  const sel=document.getElementById('dl-visa-res');
+  const msg=document.getElementById('dl-visa-msg');
+  msg.textContent='Scanning VISA resources…';
+  try{
+    const j=await(await fetch('/api/dcload/visa_resources')).json();
+    sel.innerHTML='';
+    const usb=j.resources?j.resources.filter(r=>r.is_usbtmc):[];
+    const all=j.resources||[];
+    const list=usb.length?usb:all;
+    if(list.length){
+      list.forEach(r=>{const o=document.createElement('option');o.value=r.resource;o.textContent=r.resource;sel.appendChild(o);});
+      msg.textContent=(usb.length?usb.length+' USBTMC':all.length+' VISA')+' resource'+(list.length===1?'':'s')+' found';
+    }else{
+      sel.innerHTML='<option value="">No VISA instruments found</option>';
+      msg.textContent='No instruments. Check NI-VISA is installed and SDL is connected via USB.';
+    }
+  }catch(e){msg.textContent='Error: '+e;}
 }
 async function dlRefreshPorts(){
   const sel=document.getElementById('dl-com');
@@ -1465,7 +1507,7 @@ async function dlRefreshPorts(){
 }
 async function dlConnect(){
   const mode=document.getElementById('dl-iface').value;
-  const p={instrument:'dcload',mode,host:document.getElementById('dl-host').value,port:document.getElementById('dl-port').value,port_serial:document.getElementById('dl-com').value};
+  const visa=mode==='visa'?(document.getElementById('dl-visa-res')?document.getElementById('dl-visa-res').value:''):'';const p={instrument:'dcload',mode,host:document.getElementById('dl-host').value,port:document.getElementById('dl-port').value,port_serial:document.getElementById('dl-com').value,visa_resource:visa};
   const j=await(await fetch('/api/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})).json();
   if(j.ok){dlSetConn(true);document.getElementById('dl-idn').textContent=`${j.idn.manufacturer} ${j.idn.model}  S/N:${j.idn.serial}`;startDlPoll();}
   else showMsg('dl-msg','Connect failed: '+j.error,'err');
