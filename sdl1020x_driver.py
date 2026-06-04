@@ -80,14 +80,17 @@ class SDL1020XDriver:
                 )
         try:
             inst = rm.open_resource(resource)
-            inst.timeout           = 8000
-            inst.read_termination  = "\n"
+            inst.timeout           = 15000  # 15 s — USBTMC can be slow on first connect
+            # Do NOT set read_termination for USBTMC — NI-VISA uses the EOM bit.
+            # Setting it to "\n" causes VI_ERROR_TMO if the SDL omits the newline.
+            inst.read_termination  = ""
             inst.write_termination = "\n"
         except Exception as e:
             raise SDL1020XError(f"VISA open failed for '{resource}': {e}") from e
         self._visa_inst = inst
         self._mode = "visa"
-        self._flush()
+        self._recv_buf = b""
+        time.sleep(0.3)  # allow USBTMC enumeration to settle before first query
 
     def connect_serial(self, port: str, baud: int = 115200, timeout: float = 2.0) -> None:
         import serial
@@ -179,9 +182,8 @@ class SDL1020XDriver:
             self._sock.settimeout(5.0)
         elif self._mode == "serial" and self._serial:
             self._serial.reset_input_buffer()
-        elif self._mode == "visa" and self._visa_inst:
-            try: self._visa_inst.clear()
-            except Exception: pass
+        # Note: do NOT call inst.clear() for VISA — it sends a USBTMC CLEAR
+        # which resets the SDL's USB state and causes the next query to time out.
 
     def write(self, cmd: str) -> None:
         with self._lock:
