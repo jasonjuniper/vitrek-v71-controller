@@ -192,6 +192,24 @@
     }
   },
 
+  "usb_c_profiles": {
+    "_comment": "Predefined DC load test profiles for USB-C / USB-PD power supplies. mode: CC|CV|CR|CP. setpoint is in the mode's native unit (A for CC, V for CV, Ω for CR, W for CP). ovp_v and ocp_a are protection limits.",
+    "profiles": [
+      {"id": "usb2_500mA",    "name": "USB 2.0",          "standard": "USB 2.0",       "mode": "CC", "setpoint": 0.500, "unit": "A", "nom_v": 5.0,  "power_w": 2.5,  "ovp_v": 5.5,  "ocp_a": 1.0},
+      {"id": "usb3_900mA",    "name": "USB 3.0",          "standard": "USB 3.0",       "mode": "CC", "setpoint": 0.900, "unit": "A", "nom_v": 5.0,  "power_w": 4.5,  "ovp_v": 5.5,  "ocp_a": 1.5},
+      {"id": "bc12_1500mA",   "name": "BC 1.2 / 7.5W",   "standard": "USB BC 1.2",    "mode": "CC", "setpoint": 1.500, "unit": "A", "nom_v": 5.0,  "power_w": 7.5,  "ovp_v": 5.5,  "ocp_a": 2.0},
+      {"id": "pd_5v3a",       "name": "PD 5V / 15W",      "standard": "USB PD",        "mode": "CC", "setpoint": 3.000, "unit": "A", "nom_v": 5.0,  "power_w": 15.0, "ovp_v": 5.5,  "ocp_a": 3.5},
+      {"id": "pd_9v3a",       "name": "PD 9V / 27W",      "standard": "USB PD",        "mode": "CC", "setpoint": 3.000, "unit": "A", "nom_v": 9.0,  "power_w": 27.0, "ovp_v": 9.8,  "ocp_a": 3.5},
+      {"id": "pd_12v3a",      "name": "PD 12V / 36W",     "standard": "USB PD",        "mode": "CC", "setpoint": 3.000, "unit": "A", "nom_v": 12.0, "power_w": 36.0, "ovp_v": 13.0, "ocp_a": 3.5},
+      {"id": "pd_15v3a",      "name": "PD 15V / 45W",     "standard": "USB PD",        "mode": "CC", "setpoint": 3.000, "unit": "A", "nom_v": 15.0, "power_w": 45.0, "ovp_v": 16.0, "ocp_a": 3.5},
+      {"id": "pd_20v3a",      "name": "PD 20V / 60W",     "standard": "USB PD",        "mode": "CC", "setpoint": 3.000, "unit": "A", "nom_v": 20.0, "power_w": 60.0, "ovp_v": 21.5, "ocp_a": 3.5},
+      {"id": "pec0063_rated", "name": "PEC-0063 65W",     "standard": "Juniper / UL",  "mode": "CC", "setpoint": 3.250, "unit": "A", "nom_v": 20.0, "power_w": 65.0, "ovp_v": 21.5, "ocp_a": 4.0},
+      {"id": "pec0063_test",  "name": "PEC-0063 66W test","standard": "Juniper / UL",  "mode": "CP", "setpoint": 66.0, "unit": "W", "nom_v": 20.0, "power_w": 66.0, "ovp_v": 21.5, "ocp_a": 4.0},
+      {"id": "pd_20v5a",      "name": "PD 20V / 100W",    "standard": "USB PD",        "mode": "CC", "setpoint": 5.000, "unit": "A", "nom_v": 20.0, "power_w": 100.0,"ovp_v": 21.5, "ocp_a": 5.5},
+      {"id": "epr_28v5a",     "name": "EPR 28V / 140W",   "standard": "USB PD EPR",    "mode": "CC", "setpoint": 5.000, "unit": "A", "nom_v": 28.0, "power_w": 140.0,"ovp_v": 30.0, "ocp_a": 5.5}
+    ]
+  },
+
   "instruments": {
     "hipot": {
       "driver": "v71_driver",

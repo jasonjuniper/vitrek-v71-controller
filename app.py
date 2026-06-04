@@ -574,6 +574,13 @@ def api_dcload_ports():
 
 
 
+@app.route("/api/dcload/profiles")
+def api_dcload_profiles():
+    """Return USB-C / USB-PD predefined load test profiles from rig_config.json."""
+    profiles = RIG_CONFIG.get("usb_c_profiles", {}).get("profiles", [])
+    return jsonify({"ok": True, "profiles": profiles})
+
+
 @app.route("/api/dcload/measure")
 def api_dcload_measure():
     if not _dcload or not _dcload.connected:
@@ -1272,6 +1279,11 @@ _DCLOAD_HTML = _render_head("DC Load — SDL1020X", tab_dcload="active") + r"""
         <div id="dl-idn" style="font-size:.76rem;color:var(--text-muted);margin-top:6px;"></div>
       </div>
       <div class="card">
+        <h2>Quick Load Tests <span style="font-size:.72rem;font-weight:400;color:var(--text-muted);">USB-C / USB-PD profiles</span></h2>
+        <div id="dl-profiles" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:4px;"></div>
+        <div id="dl-profile-msg" style="font-size:.72rem;color:var(--text-muted);margin-top:2px;"></div>
+      </div>
+      <div class="card">
         <h2>Load Configuration</h2>
         <label>Mode</label>
         <select id="dl-mode">
@@ -1305,6 +1317,38 @@ _DCLOAD_HTML = _render_head("DC Load — SDL1020X", tab_dcload="active") + r"""
   </div>
 </main>
 """ + _HTML_FOOT % dict(extra_js=r"""<script>
+async function dlLoadProfiles(){
+  try{
+    const j=await(await fetch('/api/dcload/profiles')).json();
+    const box=document.getElementById('dl-profiles');
+    if(!j.profiles||!j.profiles.length){box.innerHTML='<span style="font-size:.75rem;color:var(--text-muted);">No profiles configured</span>';return;}
+    j.profiles.forEach(p=>{
+      const btn=document.createElement('button');
+      btn.className='btn-muted';
+      btn.style.cssText='font-size:.75rem;padding:5px 8px;text-align:left;line-height:1.3;';
+      btn.innerHTML='<strong>'+p.name+'</strong><br><span style="color:var(--text-muted);">'+p.standard+' · '+p.power_w+'W</span>';
+      btn.onclick=()=>dlApplyProfile(p);
+      box.appendChild(btn);
+    });
+  }catch(e){console.warn('Could not load profiles',e);}
+}
+function dlApplyProfile(p){
+  // Set mode dropdown
+  const msel=document.getElementById('dl-mode');
+  for(let i=0;i<msel.options.length;i++){
+    if(msel.options[i].value===p.mode){msel.selectedIndex=i;break;}
+  }
+  // Trigger label update
+  const labels={CC:'Set Current (A)',CV:'Set Voltage (V)',CR:'Set Resistance (\u03a9)',CP:'Set Power (W)'};
+  document.getElementById('dl-val-label').textContent=labels[p.mode]||'Value';
+  // Set value
+  document.getElementById('dl-value').value=p.setpoint;
+  // Show confirmation
+  const msg=document.getElementById('dl-profile-msg');
+  msg.textContent='\u2713 '+p.name+': '+p.mode+' '+p.setpoint+p.unit+' ('+p.power_w+'W) — click Apply then Input ON to start';
+  msg.style.color='var(--success)';
+}
+dlLoadProfiles();
 let dlPoll=null;
 document.getElementById('dl-mode').addEventListener('change',e=>{
   const labels={CC:'Set Current (A)',CV:'Set Voltage (V)',CR:'Set Resistance (Ω)',CP:'Set Power (W)'};
