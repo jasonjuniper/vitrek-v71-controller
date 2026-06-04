@@ -206,7 +206,17 @@
       {"id": "pec0063_rated", "name": "PEC-0063 65W",     "standard": "Juniper / UL",  "mode": "CC", "setpoint": 3.250, "unit": "A", "nom_v": 20.0, "power_w": 65.0, "ovp_v": 21.5, "ocp_a": 4.0},
       {"id": "pec0063_test",  "name": "PEC-0063 66W test","standard": "Juniper / UL",  "mode": "CP", "setpoint": 66.0, "unit": "W", "nom_v": 20.0, "power_w": 66.0, "ovp_v": 21.5, "ocp_a": 4.0},
       {"id": "pd_20v5a",      "name": "PD 20V / 100W",    "standard": "USB PD",        "mode": "CC", "setpoint": 5.000, "unit": "A", "nom_v": 20.0, "power_w": 100.0,"ovp_v": 21.5, "ocp_a": 5.5},
-      {"id": "epr_28v5a",     "name": "EPR 28V / 140W",   "standard": "USB PD EPR",    "mode": "CC", "setpoint": 5.000, "unit": "A", "nom_v": 28.0, "power_w": 140.0,"ovp_v": 30.0, "ocp_a": 5.5}
+      {"id": "epr_28v5a",     "name": "EPR 28V / 140W",   "standard": "USB PD EPR",    "mode": "CC", "setpoint": 5.000, "unit": "A", "nom_v": 28.0, "power_w": 140.0,"ovp_v": 30.0, "ocp_a": 5.5},
+
+      {"id": "apple_20w",     "name": "Apple 20W",         "standard": "Apple USB-C",   "mode": "CC", "setpoint": 2.220, "unit": "A", "nom_v": 9.0,  "power_w": 20.0, "ovp_v": 9.8,  "ocp_a": 2.8},
+      {"id": "apple_30w",     "name": "Apple 30W",         "standard": "Apple USB-C",   "mode": "CC", "setpoint": 2.000, "unit": "A", "nom_v": 15.0, "power_w": 30.0, "ovp_v": 16.0, "ocp_a": 2.5},
+      {"id": "apple_45w",     "name": "Apple 45W",         "standard": "Apple USB-C",   "mode": "CC", "setpoint": 3.000, "unit": "A", "nom_v": 15.0, "power_w": 45.0, "ovp_v": 16.0, "ocp_a": 3.5},
+      {"id": "apple_61w",     "name": "Apple 61W",         "standard": "Apple USB-C",   "mode": "CC", "setpoint": 3.050, "unit": "A", "nom_v": 20.0, "power_w": 61.0, "ovp_v": 21.5, "ocp_a": 3.5},
+      {"id": "apple_67w",     "name": "Apple 67W",         "standard": "Apple USB-C",   "mode": "CC", "setpoint": 3.350, "unit": "A", "nom_v": 20.0, "power_w": 67.0, "ovp_v": 21.5, "ocp_a": 4.0},
+
+      {"id": "qc30_9v",       "name": "QC 3.0 / 18W (9V)", "standard": "Qualcomm QC 3.0","mode": "CC", "setpoint": 2.000, "unit": "A", "nom_v": 9.0,  "power_w": 18.0, "ovp_v": 9.8,  "ocp_a": 2.5},
+      {"id": "qc30_12v",      "name": "QC 3.0 / 18W (12V)","standard": "Qualcomm QC 3.0","mode": "CC", "setpoint": 1.500, "unit": "A", "nom_v": 12.0, "power_w": 18.0, "ovp_v": 13.0, "ocp_a": 2.0},
+      {"id": "qc40_27w",      "name": "QC 4.0 / 27W",     "standard": "Qualcomm QC 4.0","mode": "CC", "setpoint": 3.000, "unit": "A", "nom_v": 9.0,  "power_w": 27.0, "ovp_v": 9.8,  "ocp_a": 3.5}
     ]
   },
 
