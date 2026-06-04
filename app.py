@@ -557,6 +557,20 @@ def api_hipot_live():
 # DC LOAD API
 # ═══════════════════════════════════════════════════════════════════════════════
 
+@app.route("/api/dcload/ports")
+def api_dcload_ports():
+    """Return available serial/COM ports for the USB CDC connection UI."""
+    try:
+        from serial.tools.list_ports import comports
+        ports = [
+            {"port": p.device, "description": p.description or p.device}
+            for p in sorted(comports(), key=lambda x: x.device)
+        ]
+        return jsonify({"ok": True, "ports": ports})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "ports": []})
+
+
 @app.route("/api/dcload/measure")
 def api_dcload_measure():
     if not _dcload or not _dcload.connected:
@@ -1207,6 +1221,281 @@ async function poll(){
   (j.step_status||'').split('').forEach((ch,i)=>{const b=document.createElement('span');b.className='step-badge '+(ch==='?'?'running':ch);b.textContent=`S${i+1}:${ch==='?'?'…':ch}`;prog.appendChild(b);});
   if(j.running){
     const lr=await(await fetch('/api/hipot/live')).json();
+    document.getElementById('lv-volts').textContent=lr.volts!=null?lr.volts.toExponential(3):'—';
+    document.getElementById('lv-amps').textContent=lr.amps!=null?lr.amps.toExponential(3):'—';
+    document.getElementById('lv-ohms').textContent=lr.ohms!=null?lr.ohms.toExponential(3):'—';
+  } else if(_running){_running=false;clearInterval(_pollTimer);loadHistory();}
+}
+function showMsg(id,txt,type){document.getElementById(id).innerHTML=`<div class="msg ${type}">${txt}</div>`;}
+async function loadHistory(){
+  const r=await(await fetch('/api/sessions?limit=10')).json();if(!r.ok)return;
+  document.getElementById('hist-stats').textContent=`${r.stats.total} total · ${r.stats.passed} pass · ${r.stats.failed} fail`;
+  const tb=document.getElementById('hist-body');tb.innerHTML='';
+  r.sessions.forEach(row=>{const p=row.passed;const cls=p===1?'pass':p===0?'fail':'';const tag=p===1?'<span class="tag-pass">✓</span>':p===0?'<span class="tag-fail">✗</span>':'—';const tr=document.createElement('tr');tr.className=cls;tr.innerHTML=`<td>${row.id}</td><td>${(row.started_at||'').slice(0,16)}</td><td>${row.part_number||'—'}/${row.serial_number||'—'}</td><td>${tag}</td><td><a href="/api/export/${row.id}" style="color:var(--primary);font-size:.72rem;">⬇</a></td>`;tb.appendChild(tr);});
+}
+loadHistory();
+setInterval(async()=>{if(!_running){const j=await(await fetch('/api/hipot/status')).json();if(j.running){_running=true;startPoll();}}},2000);
+</script>""")
+
+
+# ── DC Load page ───────────────────────────────────────────────────────────────
+_DCLOAD_HTML = _render_head("DC Load — SDL1020X", tab_dcload="active") + r"""
+<main class="app-main">
+  <div class="layout-2col">
+    <div class="col-left">
+      <div class="card">
+        <h2>Connection</h2>
+        <label>Interface</label>
+        <select id="dl-iface" onchange="dlIfaceChange()">
+          <option value="tcp">LAN / TCP (recommended)</option>
+          <option value="serial">USB CDC / COM Port</option>
+        </select>
+        <div id="dl-tcp-opts">
+          <label>Host IP</label><input id="dl-host" value="192.168.1.101">
+          <label>Port</label><input id="dl-port" value="5025">
+        </div>
+        <div id="dl-serial-opts" style="display:none">
+          <label style="display:flex;align-items:center;justify-content:space-between;">
+            COM Port
+            <button class="btn-muted" style="padding:2px 8px;font-size:.72rem;margin:0;" onclick="dlRefreshPorts()">↻ Refresh</button>
+          </label>
+          <select id="dl-com" style="font-family:monospace;"></select>
+          <div id="dl-ports-msg" style="font-size:.72rem;color:var(--text-muted);margin-top:3px;"></div>
+        </div>
+        <div class="btn-row">
+          <button class="btn-primary" id="dl-btn-connect" onclick="dlConnect()">Connect</button>
+          <button class="btn-muted"   id="dl-btn-disconnect" disabled onclick="dlDisconnect()">Disconnect</button>
+        </div>
+        <div id="dl-idn" style="font-size:.76rem;color:var(--text-muted);margin-top:6px;"></div>
+      </div>
+      <div class="card">
+        <h2>Load Configuration</h2>
+        <label>Mode</label>
+        <select id="dl-mode">
+          <option value="CC">CC — Constant Current</option>
+          <option value="CV">CV — Constant Voltage</option>
+          <option value="CR">CR — Constant Resistance</option>
+          <option value="CP">CP — Constant Power</option>
+        </select>
+        <label id="dl-val-label">Set Current (A)</label>
+        <input id="dl-value" type="number" step="0.001" value="1.0">
+        <div class="btn-row">
+          <button class="btn-primary" id="dl-btn-set" disabled onclick="dlConfigure()">Apply</button>
+          <button class="btn-green"   id="dl-btn-on"  disabled onclick="dlInput(true)">▶ Input ON</button>
+          <button class="btn-red"     id="dl-btn-off" disabled onclick="dlInput(false)">■ Input OFF</button>
+        </div>
+        <div id="dl-msg"></div>
+      </div>
+    </div>
+    <div class="col-right">
+      <div class="card">
+        <h2>Live Measurements <span id="dl-input-badge" style="font-size:.75rem;color:var(--text-muted);"></span></h2>
+        <div class="grid-2" style="margin-bottom:10px;">
+          <div class="live-tile"><div class="lv-label">Voltage (V)</div><div class="lv-val" id="dl-volts">—</div></div>
+          <div class="live-tile"><div class="lv-label">Current (A)</div><div class="lv-val" id="dl-amps">—</div></div>
+          <div class="live-tile"><div class="lv-label">Power (W)</div><div class="lv-val" id="dl-watts">—</div></div>
+          <div class="live-tile"><div class="lv-label">Resistance (Ω)</div><div class="lv-val" id="dl-ohms">—</div></div>
+        </div>
+        <div id="dl-status-line" style="font-size:.8rem;color:var(--text-muted);">Not connected</div>
+      </div>
+    </div>
+  </div>
+</main>
+""" + _HTML_FOOT % dict(extra_js=r"""<script>
+let dlPoll=null;
+document.getElementById('dl-mode').addEventListener('change',e=>{
+  const labels={CC:'Set Current (A)',CV:'Set Voltage (V)',CR:'Set Resistance (Ω)',CP:'Set Power (W)'};
+  document.getElementById('dl-val-label').textContent=labels[e.target.value]||'Value';
+});
+function dlIfaceChange(){
+  const serial=document.getElementById('dl-iface').value==='serial';
+  document.getElementById('dl-tcp-opts').style.display=serial?'none':'';
+  document.getElementById('dl-serial-opts').style.display=serial?'':'none';
+  if(serial) dlRefreshPorts();
+}
+async function dlRefreshPorts(){
+  const sel=document.getElementById('dl-com');
+  const msg=document.getElementById('dl-ports-msg');
+  msg.textContent='Scanning…';
+  try{
+    const j=await(await fetch('/api/dcload/ports')).json();
+    sel.innerHTML='';
+    if(j.ports&&j.ports.length){
+      j.ports.forEach(p=>{
+        const o=document.createElement('option');
+        o.value=p.port;
+        o.textContent=p.port+(p.description&&p.description!==p.port?' — '+p.description:'');
+        sel.appendChild(o);
+      });
+      msg.textContent=j.ports.length+' port'+(j.ports.length===1?'':'s')+' found';
+    }else{
+      sel.innerHTML='<option value="">No ports found</option>';
+      msg.textContent='No serial ports detected. Check USB cable and driver.';
+    }
+  }catch(e){msg.textContent='Error scanning ports: '+e;}
+}
+async function dlConnect(){
+  const mode=document.getElementById('dl-iface').value;
+  const p={instrument:'dcload',mode,host:document.getElementById('dl-host').value,port:document.getElementById('dl-port').value,port_serial:document.getElementById('dl-com').value};
+  const j=await(await fetch('/api/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})).json();
+  if(j.ok){dlSetConn(true);document.getElementById('dl-idn').textContent=`${j.idn.manufacturer} ${j.idn.model}  S/N:${j.idn.serial}`;startDlPoll();}
+  else showMsg('dl-msg','Connect failed: '+j.error,'err');
+}
+async function dlDisconnect(){await fetch('/api/disconnect',{method:'POST'});dlSetConn(false);if(dlPoll)clearInterval(dlPoll);}
+function dlSetConn(c){
+  document.getElementById('dl-btn-connect').disabled=c;
+  document.getElementById('dl-btn-disconnect').disabled=!c;
+  document.getElementById('dl-btn-set').disabled=!c;
+  document.getElementById('dl-btn-on').disabled=!c;
+  document.getElementById('dl-btn-off').disabled=!c;
+}
+async function dlConfigure(){
+  const p={mode:document.getElementById('dl-mode').value,value:document.getElementById('dl-value').value};
+  const j=await(await fetch('/api/dcload/configure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})).json();
+  if(j.ok)showMsg('dl-msg',`Mode: ${j.mode}  Set: ${j.value}`,'ok');
+  else showMsg('dl-msg','Error: '+j.error,'err');
+}
+async function dlInput(on){
+  const j=await(await fetch('/api/dcload/input',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({on})})).json();
+  if(!j.ok)showMsg('dl-msg','Error: '+j.error,'err');
+}
+function startDlPoll(){if(dlPoll)clearInterval(dlPoll);dlPoll=setInterval(dlMeasure,500);}
+async function dlMeasure(){
+  try{
+    const j=await(await fetch('/api/dcload/measure')).json();
+    if(!j.ok){document.getElementById('dl-status-line').textContent='Disconnected';return;}
+    document.getElementById('dl-volts').textContent=j.voltage_v!=null?j.voltage_v.toFixed(4):'—';
+    document.getElementById('dl-amps').textContent=j.current_a!=null?j.current_a.toFixed(4):'—';
+    document.getElementById('dl-watts').textContent=j.power_w!=null?j.power_w.toFixed(3):'—';
+    document.getElementById('dl-ohms').textContent=j.resistance_ohm!=null?j.resistance_ohm.toFixed(3):'—';
+    document.getElementById('dl-input-badge').textContent=j.input_on?'● INPUT ON':'○ INPUT OFF';
+    document.getElementById('dl-input-badge').style.color=j.input_on?'var(--success)':'var(--text-muted)';
+    document.getElementById('dl-status-line').textContent=`Mode: ${j.mode}`;
+  }catch(e){document.getElementById('dl-status-line').textContent='Read error';}
+}
+function showMsg(id,txt,type){document.getElementById(id).innerHTML=`<div class="msg ${type}">${txt}</div>`;}
+</script>""")
+
+
+# ── Thermal rig page ───────────────────────────────────────────────────────────
+_THERMAL_HTML = _render_head("Thermal Rig", tab_thermal="active") + r"""
+<main class="app-main">
+  <div class="layout-2col">
+    <div class="col-left">
+      <div class="card">
+        <h2>Connection</h2>
+        <label>PLC IP Address</label><input id="plc-ip" value="192.168.1.100">
+        <div class="btn-row">
+          <button class="btn-primary" id="th-btn-connect" onclick="thConnect()">Connect Rig</button>
+          <button class="btn-muted"   id="th-btn-disconnect" disabled onclick="thDisconnect()">Disconnect</button>
+        </div>
+        <div id="th-conn-info" style="font-size:.76rem;color:var(--text-muted);margin-top:6px;"></div>
+      </div>
+      <div class="card">
+        <h2>Temperature Control</h2>
+        <label>Target Temperature (°C)</label>
+        <input id="th-setpoint" type="number" value="25" min="0" max="120" step="0.5">
+        <div class="btn-row">
+          <button class="btn-primary" onclick="thSetpoint()">Set Target</button>
+          <button class="btn-green"   id="th-start-pid" disabled onclick="thControl(true)">▶ Start PID</button>
+          <button class="btn-red"     id="th-stop-pid"  disabled onclick="thControl(false)">■ Stop PID</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Vent Valves</h2>
+        <label>Intake Vent A (%)</label>
+        <input id="vent-a" type="range" min="0" max="100" value="0" oninput="document.getElementById('vent-a-val').textContent=this.value+'%'">
+        <span id="vent-a-val" style="font-size:.8rem;color:var(--text-muted);">0%</span>
+        <label>Exhaust Vent B (%)</label>
+        <input id="vent-b" type="range" min="0" max="100" value="0" oninput="document.getElementById('vent-b-val').textContent=this.value+'%'">
+        <span id="vent-b-val" style="font-size:.8rem;color:var(--text-muted);">0%</span>
+        <div class="btn-row">
+          <button class="btn-primary" id="th-btn-vents" disabled onclick="thVents()">Apply Vents</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>PLC Outputs</h2>
+        <div class="io-table" id="plc-outputs"></div>
+        <div id="plc-msg"></div>
+      </div>
+    </div>
+    <div class="col-right">
+      <div class="card">
+        <h2>Thermocouples</h2>
+        <div class="temp-grid" id="tc-grid">
+          <div class="temp-tile"><div class="tc-label">TC1</div><div class="tc-desc">Ambient / chamber air</div><div class="tc-val" id="tc1">—</div></div>
+          <div class="temp-tile"><div class="tc-label">TC2</div><div class="tc-desc">DUT surface</div><div class="tc-val" id="tc2">—</div></div>
+          <div class="temp-tile"><div class="tc-label">TC3</div><div class="tc-desc">Heater element</div><div class="tc-val" id="tc3">—</div></div>
+          <div class="temp-tile"><div class="tc-label">TC4</div><div class="tc-desc">Exhaust / vent</div><div class="tc-val" id="tc4">—</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Heater Status</h2>
+        <div style="margin-bottom:4px;font-size:.8rem;color:var(--text-soft);">Duty Cycle: <span id="heater-duty-pct">—</span></div>
+        <div class="gauge-bar"><div class="gauge-fill" id="heater-gauge" style="width:0%"></div></div>
+        <div style="margin-top:10px;font-size:.8rem;color:var(--text-muted);">
+          Setpoint: <span id="th-setpoint-display">—</span> °C  ·  Control: <span id="th-control-state">inactive</span>
+        </div>
+        <div id="th-fault" style="font-size:.8rem;color:var(--error-fg);margin-top:4px;"></div>
+      </div>
+      <div class="card">
+        <h2>PLC Inputs</h2>
+        <div class="io-table" id="plc-inputs"></div>
+      </div>
+    </div>
+  </div>
+</main>
+""" + _HTML_FOOT % dict(extra_js=r"""<script>
+let thPoll=null;
+async function thConnect(){
+  const p={instrument:'thermal',plc_host:document.getElementById('plc-ip').value};
+  const j=await(await fetch('/api/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})).json();
+  if(j.ok){
+    thSetConn(true);
+    const w=j.warnings&&j.warnings.length?'  ⚠ '+j.warnings.join(', '):'';
+    document.getElementById('th-conn-info').textContent=`PLC ${j.plc_connected?'connected':'offline'}  ·  Thermal ${j.thermal_ready?'ready':'not available'}${w}`;
+    startThPoll();
+  } else showMsg('th-conn-info',j.error,'err');
+}
+async function thDisconnect(){await fetch('/api/disconnect',{method:'POST'});thSetConn(false);if(thPoll)clearInterval(thPoll);}
+function thSetConn(c){
+  document.getElementById('th-btn-connect').disabled=c;
+  document.getElementById('th-btn-connect').disabled=c;
+  document.getElementById('th-btn-disconnect').disabled=!c;
+  document.getElementById('th-start-pid').disabled=!c;
+  document.getElementById('th-stop-pid').disabled=!c;
+  document.getElementById('th-btn-vents').disabled=!c;
+}
+async function thSetpoint(){
+  const t=parseFloat(document.getElementById('th-setpoint').value);
+  await fetch('/api/thermal/setpoint',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({temp_c:t})});
+}
+async function thControl(start){
+  await fetch('/api/thermal/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({start})});
+}
+async function thVents(){
+  await fetch('/api/thermal/vent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({vent:'A',percent:parseFloat(document.getElementById('vent-a').value)})});
+  await fetch('/api/thermal/vent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({vent:'B',percent:parseFloat(document.getElementById('vent-b').value)})});
+}
+function startThPoll(){if(thPoll)clearInterval(thPoll);thPoll=setInterval(thUpdate,1000);}
+async function thUpdate(){
+  try{
+    const j=await(await fetch('/api/thermal/status')).json();
+    if(!j.ok)return;
+    // Temps
+    const tm=j.temps||{};
+    const keys=['TC1_AMBIENT','TC2_DUT','TC3_HEATER','TC4_EXHAUST'];
+    const ids=['tc1','tc2','tc3','tc4'];
+    keys.forEach((k,i)=>{
+      const v=tm[k];const el=document.getElementById(ids[i]);
+      if(v==null){el.textContent='—';el.className='tc-val';}
+      else{el.textContent=v.toFixed(1)+'°C';el.className='tc-val'+(v>100?' alarm':v>60?' hot':'');}
+    });
+    // Heater
+    const duty=j.heater_duty_pct||0;
+    document.getElementById('heater-duty-pct').textContent=duty.toFixed(1)+'%';
+    document.getElementById('heater-gauge').style.width=duty+'%';
+    document.getElementById('heater-gauge').style.background=duty>75?'var(--error-fg)':duty>40?'#c46200':'var(--primary)';
     document.getElementById('lv-volts').textContent=lr.volts!=null?lr.volts.toExponential(3):'—';
     document.getElementById('lv-amps').textContent=lr.amps!=null?lr.amps.toExponential(3):'—';
     document.getElementById('lv-ohms').textContent=lr.ohms!=null?lr.ohms.toExponential(3):'—';
