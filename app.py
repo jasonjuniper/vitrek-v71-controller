@@ -571,6 +571,9 @@ def api_dcload_ports():
         return jsonify({"ok": False, "error": str(e), "ports": []})
 
 
+
+
+
 @app.route("/api/dcload/measure")
 def api_dcload_measure():
     if not _dcload or not _dcload.connected:
@@ -1514,111 +1517,6 @@ setInterval(async()=>{if(!_running){const j=await(await fetch('/api/hipot/status
 
 
 # ── DC Load page ───────────────────────────────────────────────────────────────
-_DCLOAD_HTML = _render_head("DC Load — SDL1020X", tab_dcload="active") + r"""
-<main class="app-main">
-  <div class="layout-2col">
-    <div class="col-left">
-      <div class="card">
-        <h2>Connection</h2>
-        <label>Interface</label>
-        <select id="dl-iface" onchange="document.getElementById('dl-serial-opts').style.display=this.value==='serial'?'':'none'">
-          <option value="tcp">LAN / TCP (recommended)</option>
-          <option value="serial">USB CDC / COM Port</option>
-        </select>
-        <div>
-          <label>Host IP</label><input id="dl-host" value="192.168.1.101">
-          <label>Port</label><input id="dl-port" value="5025">
-        </div>
-        <div id="dl-serial-opts" style="display:none">
-          <label>COM Port</label><input id="dl-com" value="COM5">
-        </div>
-        <div class="btn-row">
-          <button class="btn-primary" id="dl-btn-connect" onclick="dlConnect()">Connect</button>
-          <button class="btn-muted"   id="dl-btn-disconnect" disabled onclick="dlDisconnect()">Disconnect</button>
-        </div>
-        <div id="dl-idn" style="font-size:.76rem;color:var(--text-muted);margin-top:6px;"></div>
-      </div>
-      <div class="card">
-        <h2>Load Configuration</h2>
-        <label>Mode</label>
-        <select id="dl-mode">
-          <option value="CC">CC — Constant Current</option>
-          <option value="CV">CV — Constant Voltage</option>
-          <option value="CR">CR — Constant Resistance</option>
-          <option value="CP">CP — Constant Power</option>
-        </select>
-        <label id="dl-val-label">Set Current (A)</label>
-        <input id="dl-value" type="number" step="0.001" value="1.0">
-        <div class="btn-row">
-          <button class="btn-primary" id="dl-btn-set" disabled onclick="dlConfigure()">Apply</button>
-          <button class="btn-green"   id="dl-btn-on"  disabled onclick="dlInput(true)">▶ Input ON</button>
-          <button class="btn-red"     id="dl-btn-off" disabled onclick="dlInput(false)">■ Input OFF</button>
-        </div>
-        <div id="dl-msg"></div>
-      </div>
-    </div>
-    <div class="col-right">
-      <div class="card">
-        <h2>Live Measurements <span id="dl-input-badge" style="font-size:.75rem;color:var(--text-muted);"></span></h2>
-        <div class="grid-2" style="margin-bottom:10px;">
-          <div class="live-tile"><div class="lv-label">Voltage (V)</div><div class="lv-val" id="dl-volts">—</div></div>
-          <div class="live-tile"><div class="lv-label">Current (A)</div><div class="lv-val" id="dl-amps">—</div></div>
-          <div class="live-tile"><div class="lv-label">Power (W)</div><div class="lv-val" id="dl-watts">—</div></div>
-          <div class="live-tile"><div class="lv-label">Resistance (Ω)</div><div class="lv-val" id="dl-ohms">—</div></div>
-        </div>
-        <div id="dl-status-line" style="font-size:.8rem;color:var(--text-muted);">Not connected</div>
-      </div>
-    </div>
-  </div>
-</main>
-""" + _HTML_FOOT % dict(extra_js=r"""<script>
-let dlPoll=null;
-document.getElementById('dl-mode').addEventListener('change',e=>{
-  const labels={CC:'Set Current (A)',CV:'Set Voltage (V)',CR:'Set Resistance (Ω)',CP:'Set Power (W)'};
-  document.getElementById('dl-val-label').textContent=labels[e.target.value]||'Value';
-});
-async function dlConnect(){
-  const mode=document.getElementById('dl-iface').value;
-  const p={instrument:'dcload',mode,host:document.getElementById('dl-host').value,port:document.getElementById('dl-port').value,port_serial:document.getElementById('dl-com').value};
-  const j=await(await fetch('/api/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})).json();
-  if(j.ok){dlSetConn(true);document.getElementById('dl-idn').textContent=`${j.idn.manufacturer} ${j.idn.model}  S/N:${j.idn.serial}`;startDlPoll();}
-  else showMsg('dl-msg','Connect failed: '+j.error,'err');
-}
-async function dlDisconnect(){await fetch('/api/disconnect',{method:'POST'});dlSetConn(false);if(dlPoll)clearInterval(dlPoll);}
-function dlSetConn(c){
-  document.getElementById('dl-btn-connect').disabled=c;
-  document.getElementById('dl-btn-disconnect').disabled=!c;
-  document.getElementById('dl-btn-set').disabled=!c;
-  document.getElementById('dl-btn-on').disabled=!c;
-  document.getElementById('dl-btn-off').disabled=!c;
-}
-async function dlConfigure(){
-  const p={mode:document.getElementById('dl-mode').value,value:document.getElementById('dl-value').value};
-  const j=await(await fetch('/api/dcload/configure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})).json();
-  if(j.ok)showMsg('dl-msg',`Mode: ${j.mode}  Set: ${j.value}`,'ok');
-  else showMsg('dl-msg','Error: '+j.error,'err');
-}
-async function dlInput(on){
-  const j=await(await fetch('/api/dcload/input',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({on})})).json();
-  if(!j.ok)showMsg('dl-msg','Error: '+j.error,'err');
-}
-function startDlPoll(){if(dlPoll)clearInterval(dlPoll);dlPoll=setInterval(dlMeasure,500);}
-async function dlMeasure(){
-  try{
-    const j=await(await fetch('/api/dcload/measure')).json();
-    if(!j.ok){document.getElementById('dl-status-line').textContent='Disconnected';return;}
-    document.getElementById('dl-volts').textContent=j.voltage_v!=null?j.voltage_v.toFixed(4):'—';
-    document.getElementById('dl-amps').textContent=j.current_a!=null?j.current_a.toFixed(4):'—';
-    document.getElementById('dl-watts').textContent=j.power_w!=null?j.power_w.toFixed(3):'—';
-    document.getElementById('dl-ohms').textContent=j.resistance_ohm!=null?j.resistance_ohm.toFixed(3):'—';
-    document.getElementById('dl-input-badge').textContent=j.input_on?'● INPUT ON':'○ INPUT OFF';
-    document.getElementById('dl-input-badge').style.color=j.input_on?'var(--success)':'var(--text-muted)';
-    document.getElementById('dl-status-line').textContent=`Mode: ${j.mode}`;
-  }catch(e){document.getElementById('dl-status-line').textContent='Read error';}
-}
-function showMsg(id,txt,type){document.getElementById(id).innerHTML=`<div class="msg ${type}">${txt}</div>`;}
-</script>""")
-
 
 # ── Thermal rig page ───────────────────────────────────────────────────────────
 _THERMAL_HTML = _render_head("Thermal Rig", tab_thermal="active") + r"""
