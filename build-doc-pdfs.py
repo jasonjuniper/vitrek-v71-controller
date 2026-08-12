@@ -267,16 +267,24 @@ def build_pdf(md_path: str, pdf_basename: str) -> None:
         CHROME, '--headless=new', '--disable-gpu', '--no-sandbox',
         '--no-pdf-header-footer', f'--print-to-pdf={pdf_path}', file_url,
     ]
+    # Existence is not evidence of a write: in a repo that has rendered
+    # before, last run's PDF is already at this path.
+    _before_mtime = os.path.getmtime(pdf_path) if os.path.exists(pdf_path) else None
     print(f'[+] {os.path.basename(md_path)} -> {pdf_basename}')
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if result.returncode != 0:
             print('    Chrome stderr:', result.stderr[:500])
+        wrote = os.path.exists(pdf_path) and (
+            _before_mtime is None or os.path.getmtime(pdf_path) > _before_mtime)
+        if wrote:
+            print(f'    OK -> {pdf_path} ({os.path.getsize(pdf_path)/1024:.1f} KB)')
+            return True
         if os.path.exists(pdf_path):
-            size_kb = os.path.getsize(pdf_path) / 1024
-            print(f'    OK -> {pdf_path} ({size_kb:.1f} KB)')
+            print('    FAILED: the existing PDF was NOT rewritten (stale file left in place)')
         else:
-            print(f'    FAILED: no PDF produced')
+            print('    FAILED: no PDF produced')
+        return False
     finally:
         try:
             os.remove(html_path)
@@ -285,16 +293,23 @@ def build_pdf(md_path: str, pdf_basename: str) -> None:
 
 
 def main() -> int:
+    _ok = _failed = 0
     if not os.path.exists(CHROME):
         print(f'ERROR: Chrome not found at {CHROME}')
         return 1
     for md_path, pdf_basename in DOCS:
         try:
-            build_pdf(md_path, pdf_basename)
+            if build_pdf(md_path, pdf_basename):
+                _ok += 1
+            else:
+                _failed += 1
         except FileNotFoundError as e:
             print(f'    SKIP: {e}')
     print(f'\nAll PDFs in {OUTPUT_DIR}')
-    return 0
+    if _failed:
+        print(f'{_failed} document(s) FAILED to render')
+    # A failure that only reaches stdout does not exist to a caller.
+    return 1 if _failed else 0
 
 
 if __name__ == '__main__':
