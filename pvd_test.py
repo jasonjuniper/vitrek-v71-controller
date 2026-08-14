@@ -71,14 +71,33 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import threading
 import time
 from typing import Optional
 
 import database as db
+from paths import data_dir, bundled_dir
 
-_PROFILES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "pvd_profiles.json")
+
+def _resolve_profiles_path() -> str:
+    """pvd_profiles.json is mutable — baseline promotion rewrites it — so it lives
+    in the writable data dir, not next to __file__ (which is the temp _MEIPASS dir
+    under a onefile exe). On first run when frozen, seed it from the read-only copy
+    bundled in the exe. In dev, data_dir() == bundled_dir() == the repo, so this is
+    just the repo file with no copy and no behaviour change."""
+    dst = os.path.join(data_dir(), "pvd_profiles.json")
+    if not os.path.exists(dst):
+        src = os.path.join(bundled_dir(), "pvd_profiles.json")
+        try:
+            if os.path.exists(src) and os.path.abspath(src) != os.path.abspath(dst):
+                shutil.copyfile(src, dst)
+        except OSError:
+            pass
+    return dst
+
+
+_PROFILES_PATH = _resolve_profiles_path()
 
 # Verdicts
 PASS = "PASS"

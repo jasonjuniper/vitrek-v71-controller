@@ -17,7 +17,12 @@ import json
 import os
 from typing import Optional
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hipot_results.db")
+from paths import data_dir
+
+# Results DB lives in the writable, persistent data dir (ProgramData when frozen;
+# the source tree in dev). NOT next to __file__ — under a PyInstaller onefile exe
+# that resolves to the temp _MEIPASS dir and the DB would be wiped on exit.
+DB_PATH = os.path.join(data_dir(), "hipot_results.db")
 
 DDL = """
 CREATE TABLE IF NOT EXISTS test_sessions (

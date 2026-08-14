@@ -185,6 +185,31 @@ Suitable for direct upload or auto-sync to SharePoint.
 
 ---
 
+## Packaging & deployment
+
+The bench machine (**HI-POT-TEST**) does not run this from source — it runs a
+packaged single-file executable, deployed and kept current by the Juniper
+inventory server.
+
+- **Build the exe:** `powershell -ExecutionPolicy Bypass -File build-exe.ps1 -Version <x.y.z>`.
+  This produces `dist/HiPotController-<x.y.z>.exe` (PyInstaller **onefile**, windowed)
+  and prints its SHA256 + size. The build bundles `static/`, `pvd_profiles.json`,
+  `plc/rig_config.json`, and the x64 Silicon Labs CP2110 DLLs at the path
+  `v71_driver.py` loads them from. `build/` and `dist/` are gitignored — the exe is
+  a build artefact, published to the server, not committed.
+- **Persistent data (important for packaging).** Under a onefile exe,
+  `os.path.dirname(__file__)` is the temporary extraction dir that Windows deletes
+  on exit, so the app writes its **results DB** and the **mutable `pvd_profiles.json`**
+  (baseline promotion rewrites it) to `C:\ProgramData\Juniper\HiPotController`
+  instead — see `paths.py` (`data_dir()` / `bundled_dir()`). Read-only bundled
+  resources (`rig_config.json`, brand assets) are read from the bundle. Running from
+  source is unchanged: `data_dir()` resolves to the repo, so dev keeps its files in
+  place.
+- **Deploying to the fleet:** the exe is uploaded to the inventory server and the
+  catalog package **"Juniper HiPot Controller"** (device-scoped to HI-POT-TEST) is
+  bumped to the new version, with its install script pinned to the new exe's hash.
+  The agent installs to `C:\Program Files\Juniper\HiPot Controller` on next check-in.
+
 ## Notes
 
 - The DLLs must be present at `software/drivers/USB_DLLs_and_Headers/USB DLLs and Headers/x64/`, and the app must run as **x64** to match them

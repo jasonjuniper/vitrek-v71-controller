@@ -11,5 +11,11 @@ venv/
 # Large installer - excluded from git
 software/QT Insite/
 
+# PyInstaller build output (the exe is a build artefact; it is published to the
+# inventory server's package store, not committed to git)
+build/
+dist/
+*.spec
+
 # Cowork device-mount artefacts
 .fuse_hidden*
