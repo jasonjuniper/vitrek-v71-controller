@@ -77,6 +77,9 @@ import database as db
 from excel_export import export_to_excel
 from pec0063_test import PEC0063Test, evaluate_ul
 from test_battery import TestBattery, _load_batteries
+import pvd_test
+import auth
+from auth import admin_required
 
 # Drivers — loaded lazily so the app starts even without hardware
 try:
@@ -114,6 +117,17 @@ except Exception:
 app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False
 
+# Session signing key is persisted in the database, so a restart mid-shift does
+# not silently drop an admin back to operator with no explanation.
+app.secret_key = auth.get_or_create_secret_key()
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,     # the role cookie is not JS business
+    SESSION_COOKIE_SAMESITE="Lax",
+    # SESSION_COOKIE_SECURE stays off deliberately: the station is served over
+    # plain HTTP on the bench LAN, and a Secure cookie would never be sent at
+    # all, locking admin out entirely.
+)
+
 # ── Global state ──────────────────────────────────────────────────────────────
 _lock             = threading.Lock()
 
@@ -137,6 +151,9 @@ _pec0063_test = None
 
 # Test battery runner
 _battery_test = None   # PEC0063Test instance when running
+
+# PVD (Performance Verification Device) verification runner
+_pvd = None            # pvd_test.PVDVerification instance when running
 
 # Continuous sensor recorder
 _recorder_thread: threading.Thread | None = None
@@ -245,6 +262,7 @@ def _hipot_monitor(session_id: int, step_types: list[str]):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/rig/connect", methods=["POST"])
+@admin_required
 def api_rig_connect():
     """
     Connect the PLC and thermal controller. Call once at station startup.
@@ -298,6 +316,7 @@ def api_rig_connect():
 
 
 @app.route("/api/rig/disconnect", methods=["POST"])
+@admin_required
 def api_rig_disconnect():
     global _plc, _thermal, _rig_connected
     _stop_recorder()
@@ -338,6 +357,40 @@ def api_rig_status():
     return jsonify({"ok": True, **status})
 
 
+
+# ── Saved connection settings ─────────────────────────────────────────────────
+# Operators connect the instrument, but with the interface an admin configured.
+# Letting an operator pick a COM port is how you end up with half a shift of
+# results recorded against the wrong bench.
+
+_CONN_DEFAULTS = {
+    "hipot":  {"mode": "usb", "port": "COM1", "baud": 115200},
+    "dcload": {"mode": "tcp", "host": "192.168.1.101", "port": 5025,
+               "visa_resource": "", "port_serial": "COM5"},
+}
+
+
+def get_connection_settings(instrument: str) -> dict:
+    """Saved connection settings for an instrument, falling back to defaults."""
+    import json as _json
+    raw = db.get_setting(f"conn_{instrument}")
+    base = dict(_CONN_DEFAULTS.get(instrument, {}))
+    if raw:
+        try:
+            base.update(_json.loads(raw))
+        except (ValueError, TypeError):
+            pass
+    return base
+
+
+def save_connection_settings(instrument: str, settings: dict) -> dict:
+    import json as _json
+    merged = get_connection_settings(instrument)
+    merged.update({k: v for k, v in (settings or {}).items() if v not in (None, "")})
+    db.set_setting(f"conn_{instrument}", _json.dumps(merged))
+    return merged
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # INSTRUMENT API  (mutually exclusive — one instrument at a time)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -352,6 +405,16 @@ def api_instrument_connect():
     global _active_instrument, _hipot, _dcload
     d = request.get_json(force=True)
     instrument = d.get("instrument", "").lower()
+
+    # An operator may connect, but only on the saved settings. An admin's posted
+    # values win and are persisted, so "connect with these settings" doubles as
+    # "make these the settings".
+    if instrument in _CONN_DEFAULTS:
+        if auth.is_admin():
+            d = {**get_connection_settings(instrument), **d}
+            save_connection_settings(instrument, d)
+        else:
+            d = {**d, **get_connection_settings(instrument)}
 
     with _lock:
         _disconnect_instrument()
@@ -450,11 +513,24 @@ def api_status():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/hipot/run", methods=["POST"])
+@admin_required
 def api_hipot_run():
+    """
+    Run an ad-hoc sequence supplied in the request body.
+
+    Admin only, and that restriction is the whole point of the role split: this
+    route accepts arbitrary voltages and dwell times. Operators go through
+    /api/hipot/run_sequence, which can only run a stored, reviewed definition.
+    """
+    return _run_hipot_steps(request.get_json(force=True))
+
+
+def _run_hipot_steps(d: dict):
+    """Shared body for both the ad-hoc and saved-sequence run routes."""
     global _hipot_session_id, _hipot_step_types, _hipot_run_thread
     if not _hipot or not _hipot.connected:
         return jsonify({"ok": False, "error": "HiPot not connected"}), 400
-    d = request.get_json(force=True)
+    d = d or {}
     steps = d.get("steps", [])
     if not steps:
         return jsonify({"ok": False, "error": "No steps provided"}), 400
@@ -610,6 +686,7 @@ def api_dcload_measure():
 
 
 @app.route("/api/dcload/configure", methods=["POST"])
+@admin_required
 def api_dcload_configure():
     if not _dcload or not _dcload.connected:
         return jsonify({"ok": False, "error": "DC Load not connected"}), 400
@@ -628,6 +705,7 @@ def api_dcload_configure():
 
 
 @app.route("/api/dcload/input", methods=["POST"])
+@admin_required
 def api_dcload_input():
     if not _dcload or not _dcload.connected:
         return jsonify({"ok": False, "error": "DC Load not connected"}), 400
@@ -664,6 +742,7 @@ def api_thermal_status():
 
 
 @app.route("/api/thermal/setpoint", methods=["POST"])
+@admin_required
 def api_thermal_setpoint():
     if not _thermal:
         return jsonify({"ok": False, "error": "Thermal rig not initialised"}), 400
@@ -677,6 +756,7 @@ def api_thermal_setpoint():
 
 
 @app.route("/api/thermal/vent", methods=["POST"])
+@admin_required
 def api_thermal_vent():
     if not _thermal:
         return jsonify({"ok": False, "error": "Thermal rig not initialised"}), 400
@@ -691,6 +771,7 @@ def api_thermal_vent():
 
 
 @app.route("/api/thermal/control", methods=["POST"])
+@admin_required
 def api_thermal_control():
     if not _thermal:
         return jsonify({"ok": False, "error": "Thermal rig not initialised"}), 400
@@ -707,6 +788,7 @@ def api_thermal_control():
 
 
 @app.route("/api/plc/output", methods=["POST"])
+@admin_required
 def api_plc_output():
     if not _plc or not _plc.connected:
         return jsonify({"ok": False, "error": "PLC not connected"}), 400
@@ -858,6 +940,7 @@ def api_pec0063_housings():
 
 
 @app.route("/api/pec0063/start", methods=["POST"])
+@admin_required
 def api_pec0063_start():
     global _pec0063_test
     if _active_instrument not in (None, "dcload"):
@@ -902,6 +985,7 @@ def api_pec0063_status():
 
 
 @app.route("/api/pec0063/stop", methods=["POST"])
+@admin_required
 def api_pec0063_stop():
     if not _pec0063_test or _pec0063_test.status.state not in ("running", "steady_state"):
         return jsonify({"ok": False, "error": "No test running."}), 400
@@ -931,6 +1015,387 @@ def api_pec0063_evaluate():
         return jsonify({"ok": True, "evaluation": result})
     except (KeyError, ValueError) as e:
         return jsonify({"ok": False, "error": str(e)}), 400
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AUTH API
+#
+# Two roles. "operator" is the default and needs no login — it can connect the
+# instrument on saved settings and run saved sequences. "admin" needs a password
+# and can define what those sequences are.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/auth/status")
+def api_auth_status():
+    return jsonify({"ok": True, **auth.auth_status()})
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def api_auth_login():
+    """Elevate this browser session to admin."""
+    d = request.get_json(force=True) or {}
+    if not auth.admin_configured():
+        return jsonify({"ok": False,
+                        "error": "No admin password has been set on this station yet."}), 409
+    if not auth.login_admin(d.get("password", "")):
+        # No detail about which part was wrong, and no hint about the password.
+        return jsonify({"ok": False, "error": "Incorrect password."}), 401
+    return jsonify({"ok": True, **auth.auth_status()})
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def api_auth_logout():
+    auth.logout_admin()
+    return jsonify({"ok": True, **auth.auth_status()})
+
+
+@app.route("/api/auth/set_password", methods=["POST"])
+def api_auth_set_password():
+    """
+    Set or change the admin password.
+
+    First run is the one time this is open: with no password configured yet
+    there is no admin who could authorise setting one, so the station would be
+    permanently operator-only. Every later change requires the current password.
+    """
+    d = request.get_json(force=True) or {}
+    new = d.get("new_password", "")
+
+    if auth.admin_configured():
+        if not auth.is_admin() and not auth.check_admin_password(d.get("current_password", "")):
+            return jsonify({"ok": False,
+                            "error": "Current admin password required."}), 403
+
+    try:
+        auth.set_admin_password(new)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+    auth.login_admin(new)
+    return jsonify({"ok": True, **auth.auth_status()})
+
+
+@app.route("/api/settings/connection", methods=["GET", "POST"])
+def api_connection_settings():
+    """Read (any role) or change (admin only) the saved connection settings."""
+    if request.method == "GET":
+        return jsonify({"ok": True, "settings": {
+            k: get_connection_settings(k) for k in _CONN_DEFAULTS}})
+    if not auth.is_admin():
+        return jsonify({"ok": False,
+                        "error": "Admin access required to change connection settings.",
+                        "role": auth.current_role()}), 403
+    d = request.get_json(force=True) or {}
+    instrument = (d.get("instrument") or "").lower()
+    if instrument not in _CONN_DEFAULTS:
+        return jsonify({"ok": False, "error": "Unknown instrument"}), 400
+    save_connection_settings(instrument, d.get("settings", {}))
+    # Same shape as the GET, so a client never has to branch on which verb it used.
+    return jsonify({"ok": True, "settings": {
+        k: get_connection_settings(k) for k in _CONN_DEFAULTS}})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SAVED TEST SEQUENCES
+#
+# Admins define them; operators run them. This is the mechanism behind the role
+# split — an operator never posts step parameters, only a sequence id.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _validate_steps(steps):
+    """
+    Check a sequence definition before it is stored.
+
+    Validating on save rather than on run means a bad sequence is caught by the
+    admin who wrote it, not by an operator at the bench with a DUT wired up.
+    Returns an error string, or None when the steps are acceptable.
+    """
+    if not isinstance(steps, list) or not steps:
+        return "A sequence needs at least one step."
+    allowed = {"ACW", "DCW", "IR", "GB", "CONT"}
+    required = {
+        "ACW":  ["voltage"],
+        "DCW":  ["voltage"],
+        "IR":   ["voltage"],
+        "GB":   ["current"],
+        "CONT": [],
+    }
+    for i, st in enumerate(steps, 1):
+        if not isinstance(st, dict):
+            return f"Step {i} is not a set of parameters."
+        t = str(st.get("type", "")).upper()
+        if t not in allowed:
+            return f"Step {i}: unknown type '{st.get('type')}'. Use one of {sorted(allowed)}."
+        for field in required[t]:
+            if st.get(field) in (None, ""):
+                return f"Step {i} ({t}): '{field}' is required."
+        for k, v in st.items():
+            if k == "type" or v in (None, ""):
+                continue
+            if isinstance(v, bool):
+                continue
+            try:
+                float(v)
+            except (TypeError, ValueError):
+                return f"Step {i} ({t}): '{k}' must be a number, got '{v}'."
+    return None
+
+
+@app.route("/api/sequences")
+def api_sequences_list():
+    """Saved sequences. Readable by any role — operators need this to run one."""
+    instrument = request.args.get("instrument", "hipot")
+    include_inactive = request.args.get("all") == "1" and auth.is_admin()
+    seqs = db.list_sequences(instrument=instrument, active_only=not include_inactive)
+    return jsonify({"ok": True, "sequences": seqs, "role": auth.current_role()})
+
+
+@app.route("/api/sequences/<int:seq_id>")
+def api_sequence_get(seq_id):
+    seq = db.get_sequence(seq_id)
+    if not seq:
+        return jsonify({"ok": False, "error": "Not found"}), 404
+    return jsonify({"ok": True, "sequence": seq})
+
+
+@app.route("/api/sequences", methods=["POST"])
+@admin_required
+def api_sequence_create():
+    d = request.get_json(force=True) or {}
+    name = (d.get("name") or "").strip()
+    if not name:
+        return jsonify({"ok": False, "error": "A sequence needs a name."}), 400
+    err = _validate_steps(d.get("steps"))
+    if err:
+        return jsonify({"ok": False, "error": err}), 400
+    try:
+        seq_id = db.create_sequence(
+            name=name, steps=d.get("steps"), description=d.get("description", ""),
+            instrument=d.get("instrument", "hipot"), created_by=d.get("author", "admin"))
+    except Exception as e:
+        # UNIQUE(name) is the likely culprit and deserves a readable message.
+        if "UNIQUE" in str(e).upper():
+            return jsonify({"ok": False,
+                            "error": f"A sequence named '{name}' already exists."}), 409
+        return jsonify({"ok": False, "error": str(e)}), 500
+    return jsonify({"ok": True, "id": seq_id})
+
+
+@app.route("/api/sequences/<int:seq_id>", methods=["PUT", "PATCH"])
+@admin_required
+def api_sequence_update(seq_id):
+    d = request.get_json(force=True) or {}
+    if d.get("steps") is not None:
+        err = _validate_steps(d.get("steps"))
+        if err:
+            return jsonify({"ok": False, "error": err}), 400
+    ok = db.update_sequence(
+        seq_id, name=d.get("name"), steps=d.get("steps"),
+        description=d.get("description"), active=d.get("active"),
+        updated_by=d.get("author", "admin"))
+    if not ok:
+        return jsonify({"ok": False, "error": "Nothing to update, or no such sequence."}), 404
+    return jsonify({"ok": True, "sequence": db.get_sequence(seq_id)})
+
+
+@app.route("/api/sequences/<int:seq_id>", methods=["DELETE"])
+@admin_required
+def api_sequence_delete(seq_id):
+    """Retire a sequence. Soft by default so old results stay traceable."""
+    hard = request.args.get("hard") == "1"
+    if not db.delete_sequence(seq_id, hard=hard):
+        return jsonify({"ok": False, "error": "No such sequence"}), 404
+    return jsonify({"ok": True, "hard": hard})
+
+
+@app.route("/api/hipot/run_sequence", methods=["POST"])
+def api_hipot_run_sequence():
+    """
+    Run a saved sequence — the operator's entry point.
+
+    The operator supplies only who they are and what they are testing. The step
+    parameters come from the stored definition, so there is no path from this
+    route to an unreviewed test condition.
+    """
+    d = request.get_json(force=True) or {}
+    seq_id = d.get("sequence_id")
+    if not seq_id:
+        return jsonify({"ok": False, "error": "sequence_id is required"}), 400
+
+    seq = db.get_sequence(int(seq_id))
+    if not seq:
+        return jsonify({"ok": False, "error": "No such sequence"}), 404
+    if not seq.get("active") and not auth.is_admin():
+        return jsonify({"ok": False,
+                        "error": f"Sequence '{seq['name']}' has been retired."}), 403
+    if seq.get("error"):
+        return jsonify({"ok": False, "error": seq["error"]}), 500
+    if not seq.get("steps"):
+        return jsonify({"ok": False,
+                        "error": f"Sequence '{seq['name']}' has no steps."}), 400
+
+    note = d.get("notes", "")
+    stamp = f"Sequence: {seq['name']} (rev {seq.get('revision')})"
+    request_payload = {
+        "operator":      d.get("operator", ""),
+        "part_number":   d.get("part_number", ""),
+        "serial_number": d.get("serial_number", ""),
+        "notes":         f"{stamp} · {note}" if note else stamp,
+        "steps":         seq["steps"],
+    }
+    return _run_hipot_steps(request_payload)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PVD API  (Performance Verification Device — instrument self-verification)
+#
+# The V7X front panel has UTILITY MENU -> AUTO PVD, but there is no remote
+# command for it (see Section 6 of the operating manual). These routes drive an
+# equivalent verification as a programmed sequence, which additionally captures
+# the measured value at every point instead of only a front-panel verdict.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/pvd/profiles")
+def api_pvd_profiles():
+    """List the available verification profiles and whether each is baselined."""
+    try:
+        return jsonify({"ok": True, "profiles": pvd_test.list_profiles()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/pvd/profile/<profile_id>")
+def api_pvd_profile(profile_id):
+    """Full profile detail — phases, points, tolerances — for the UI."""
+    try:
+        return jsonify({"ok": True, "profile": pvd_test.get_profile(profile_id)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 404
+
+
+@app.route("/api/pvd/start", methods=["POST"])
+@admin_required
+def api_pvd_start():
+    """
+    Begin a verification.
+
+    Requires the HiPot to be the connected instrument — a verification is a
+    measurement of *that* instrument, so running it against anything else (or
+    against nothing) would be meaningless.
+    """
+    global _pvd
+    d = request.get_json(force=True) or {}
+
+    if _pvd and _pvd.get_status()["state"] in ("running", "awaiting_connection"):
+        return jsonify({"ok": False, "error": "A verification is already running"}), 409
+
+    simulate = bool(d.get("simulate", False))
+    if not simulate and (not _hipot or not _hipot.connected):
+        return jsonify({"ok": False,
+                        "error": "HiPot not connected. Connect the V71 first, "
+                                 "or pass simulate=true for a dry run."}), 400
+
+    try:
+        db.ensure_pvd_tables()
+        _pvd = pvd_test.PVDVerification(
+            driver=None if simulate else _hipot,
+            profile_id=d.get("profile_id", "apvd-74"),
+            mode=d.get("mode", "verify"),
+            metadata={
+                "operator":   d.get("operator", ""),
+                "pvd_serial": d.get("pvd_serial", ""),
+                "notes":      d.get("notes", ""),
+            },
+        )
+        _pvd.start()
+        return jsonify({"ok": True, "status": _pvd.get_status()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/pvd/status")
+def api_pvd_status():
+    """Poll the running verification. Includes the current connection prompt."""
+    if not _pvd:
+        return jsonify({"ok": True, "state": "idle", "results": []})
+    return jsonify({"ok": True, **_pvd.get_status()})
+
+
+@app.route("/api/pvd/ack", methods=["POST"])
+@admin_required
+def api_pvd_ack():
+    """Operator confirms the leads for the current phase are connected."""
+    if not _pvd:
+        return jsonify({"ok": False, "error": "No verification running"}), 400
+    if _pvd.get_status()["state"] != "awaiting_connection":
+        return jsonify({"ok": False, "error": "Not waiting for a connection"}), 409
+    _pvd.acknowledge_phase()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/pvd/stop", methods=["POST"])
+@admin_required
+def api_pvd_stop():
+    """Abort the verification and make the instrument safe."""
+    if not _pvd:
+        return jsonify({"ok": False, "error": "No verification running"}), 400
+    _pvd.stop()
+    return jsonify({"ok": True, "status": _pvd.get_status()})
+
+
+@app.route("/api/pvd/results")
+def api_pvd_results():
+    """Verification history."""
+    db.ensure_pvd_tables()
+    limit = int(request.args.get("limit", 50))
+    return jsonify({"ok": True, "runs": db.get_pvd_runs(limit=limit)})
+
+
+@app.route("/api/pvd/result/<int:run_id>")
+def api_pvd_result(run_id):
+    """One verification run with all of its evaluated points."""
+    db.ensure_pvd_tables()
+    run = db.get_pvd_run(run_id)
+    if not run:
+        return jsonify({"ok": False, "error": "Not found"}), 404
+    return jsonify({"ok": True, "run": run})
+
+
+@app.route("/api/pvd/verification_status")
+def api_pvd_verification_status():
+    """
+    When did this instrument last pass, and is that still current?
+
+    Informational only — nothing here blocks a production test. Gating belongs
+    to the quality procedure, not to this app.
+    """
+    db.ensure_pvd_tables()
+    profile_id = request.args.get("profile_id", "")
+    try:
+        return jsonify({"ok": True, **pvd_test.verification_status(profile_id)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/pvd/baseline/promote", methods=["POST"])
+@admin_required
+def api_pvd_promote():
+    """
+    Adopt a baseline run's measurements as the profile nominals.
+
+    Deliberately a separate, explicit action: this is the moment a profile
+    starts issuing verdicts, and it should only ever happen against an
+    instrument known to be within its calibration period.
+    """
+    d = request.get_json(force=True) or {}
+    run_id = d.get("run_id")
+    if not run_id:
+        return jsonify({"ok": False, "error": "run_id is required"}), 400
+    try:
+        result = pvd_test.promote_baseline(int(run_id), tol_pct=d.get("tol_pct"))
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route("/api/export")
@@ -967,6 +1432,10 @@ def page_landing():
 def page_hipot():
     return render_template_string(_HIPOT_HTML)
 
+@app.route("/pvd")
+def page_pvd():
+    return render_template_string(_PVD_HTML)
+
 @app.route("/dcload")
 def page_dcload():
     return render_template_string(_DCLOAD_HTML)
@@ -997,6 +1466,21 @@ body{min-height:100vh;display:flex;flex-direction:column;background:var(--bg);co
 .inst-tab:hover{background:var(--bg-elev-2);color:var(--text);}
 .inst-tab.active{background:var(--primary);color:#fff;border-color:var(--primary);}
 .inst-tab.connected::after{content:" ●";color:#4CAF50;font-size:.7rem;}
+/* Role-based visibility. Anything an operator must not touch carries
+   .admin-only; the shared chrome sets data-role on <body> after asking the
+   server. Elements start hidden and are revealed, never the reverse, so a
+   failed or slow role check leaves the station locked down rather than open. */
+.admin-only{display:none !important;}
+body[data-role="admin"] .admin-only{display:revert !important;}
+.role-pill{font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:10px;letter-spacing:.04em;text-transform:uppercase;background:rgba(255,255,255,.15);color:var(--juniper-offwhite);}
+.role-pill.admin{background:rgba(21,101,192,.85);}
+.role-btn{font-size:.72rem;font-weight:600;padding:3px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.35);background:transparent;color:var(--juniper-offwhite);cursor:pointer;}
+.role-btn:hover{background:rgba(255,255,255,.15);}
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:1000;}
+.modal-backdrop.open{display:flex;}
+.modal-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:22px;width:min(420px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.35);}
+.modal-card h3{font-size:1rem;font-weight:700;color:var(--primary);margin-bottom:4px;}
+.modal-card p{font-size:.78rem;color:var(--text-muted);margin-bottom:12px;}
 /* Cards */
 .card{background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:16px;box-shadow:0 2px 8px var(--shadow);margin-bottom:14px;}
 .card h2{font-size:.88rem;font-weight:600;color:var(--primary);margin-bottom:12px;border-bottom:2px solid var(--border);padding-bottom:6px;letter-spacing:.04em;text-transform:uppercase;}
@@ -1076,6 +1560,8 @@ button:disabled{opacity:.45;cursor:default;}
     <div style="display:flex;align-items:center;gap:14px;">
       <span class="juniper-product">Automated Test Station</span>
       <span class="status-pill" id="global-status">No instrument</span>
+      <span class="role-pill" id="role-pill" title="Current access level">Operator</span>
+      <button class="role-btn" id="role-btn" onclick="openAdminModal()">Admin</button>
       <button id="juniper-theme-toggle" class="juniper-theme-toggle" type="button" aria-label="Toggle theme"><span class="juniper-theme-icon">🌙</span></button>
     </div>
   </div>
@@ -1083,13 +1569,15 @@ button:disabled{opacity:.45;cursor:default;}
 <nav class="inst-nav">
   <a href="/"       class="inst-tab %(tab_home)s"   >⌂ Station</a>
   <a href="/hipot"  class="inst-tab %(tab_hipot)s"  >⚡ HiPot (V71)</a>
+  <a href="/pvd"    class="inst-tab %(tab_pvd)s"    >✓ PVD Verify</a>
   <a href="/dcload" class="inst-tab %(tab_dcload)s" >🔋 DC Load (SDL1020X)</a>
   <a href="/thermal"class="inst-tab %(tab_thermal)s">🌡 Thermal Rig</a>
 </nav>
 """
 
 def _render_head(title: str, tab_home: str = "", tab_hipot: str = "",
-                 tab_dcload: str = "", tab_thermal: str = "") -> str:
+                 tab_dcload: str = "", tab_thermal: str = "",
+                 tab_pvd: str = "") -> str:
     """Substitute named slots in _HTML_HEAD without Python % formatting.
     Using .replace() avoids TypeError from CSS percentage values like width:100%.
     """
@@ -1098,12 +1586,101 @@ def _render_head(title: str, tab_home: str = "", tab_hipot: str = "",
             .replace("%(tab_home)s",    tab_home)
             .replace("%(tab_hipot)s",   tab_hipot)
             .replace("%(tab_dcload)s",  tab_dcload)
-            .replace("%(tab_thermal)s", tab_thermal))
+            .replace("%(tab_thermal)s", tab_thermal)
+            .replace("%(tab_pvd)s",     tab_pvd))
 
 
 _HTML_FOOT = r"""
+<div class="modal-backdrop" id="role-modal" onclick="if(event.target===this)closeAdminModal()">
+  <div class="modal-card">
+    <h3 id="role-modal-title">Admin Login</h3>
+    <p id="role-modal-sub">Admin access unlocks test sequence setup, connection settings and instrument verification.</p>
+    <div id="role-modal-body"></div>
+    <div id="role-modal-msg"></div>
+    <div class="btn-row">
+      <button class="btn-primary" id="role-modal-go">Log In</button>
+      <button class="btn-muted" onclick="closeAdminModal()">Cancel</button>
+    </div>
+  </div>
+</div>
 <footer class="juniper-footer">Designed and built by <a href="https://juniperdesign.com" target="_blank" rel="noopener">Juniper Design</a></footer>
 <script src="/static/js/juniper-theme.js"></script>
+<script>
+// ── Access level ─────────────────────────────────────────────────────────────
+// The station runs as "operator" with no login. Admin is a password-gated
+// elevation of the same browser session, and it lapses on its own after a
+// period of inactivity — a bench left unattended should not stay unlocked.
+let _auth={role:'operator',is_admin:false,admin_configured:false};
+
+async function refreshRole(){
+  try{
+    const j=await(await fetch('/api/auth/status')).json();
+    if(j.ok)_auth=j;
+  }catch(e){ /* leave the last known role; failing closed is the safe default */ }
+  applyRole();
+  return _auth;
+}
+function applyRole(){
+  document.body.dataset.role=_auth.is_admin?'admin':'operator';
+  const pill=document.getElementById('role-pill');
+  const btn=document.getElementById('role-btn');
+  if(pill){pill.textContent=_auth.is_admin?'Admin':'Operator';pill.className='role-pill'+(_auth.is_admin?' admin':'');}
+  if(btn){btn.textContent=_auth.is_admin?'Log out':(_auth.admin_configured?'Admin':'Set up admin');}
+  document.dispatchEvent(new CustomEvent('rolechange',{detail:_auth}));
+}
+function openAdminModal(){
+  if(_auth.is_admin){doAdminLogout();return;}
+  const body=document.getElementById('role-modal-body');
+  const go=document.getElementById('role-modal-go');
+  const title=document.getElementById('role-modal-title');
+  const sub=document.getElementById('role-modal-sub');
+  document.getElementById('role-modal-msg').innerHTML='';
+  if(!_auth.admin_configured){
+    title.textContent='Set the Admin Password';
+    sub.textContent='No admin password has been set on this station yet. Choose one now — it is stored only as a hash, so keep the password itself in 1Password.';
+    body.innerHTML='<label>New password</label><input type="password" id="role-pw1" autocomplete="new-password">'+
+                   '<label>Confirm password</label><input type="password" id="role-pw2" autocomplete="new-password">';
+    go.textContent='Set Password';
+    go.onclick=doAdminSetPassword;
+  } else {
+    title.textContent='Admin Login';
+    sub.textContent='Admin access unlocks test sequence setup, connection settings and instrument verification.';
+    body.innerHTML='<label>Password</label><input type="password" id="role-pw1" autocomplete="current-password">';
+    go.textContent='Log In';
+    go.onclick=doAdminLogin;
+  }
+  document.getElementById('role-modal').classList.add('open');
+  setTimeout(()=>document.getElementById('role-pw1')?.focus(),50);
+  document.getElementById('role-pw1')?.addEventListener('keydown',e=>{if(e.key==='Enter')go.click();});
+  document.getElementById('role-pw2')?.addEventListener('keydown',e=>{if(e.key==='Enter')go.click();});
+}
+function closeAdminModal(){document.getElementById('role-modal').classList.remove('open');}
+function roleMsg(t,cls){document.getElementById('role-modal-msg').innerHTML=`<div class="msg ${cls}">${t}</div>`;}
+
+async function doAdminLogin(){
+  const pw=document.getElementById('role-pw1').value;
+  const j=await(await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})})).json();
+  if(j.ok){_auth=j;applyRole();closeAdminModal();}
+  else roleMsg(j.error||'Login failed','err');
+}
+async function doAdminSetPassword(){
+  const a=document.getElementById('role-pw1').value,b=document.getElementById('role-pw2').value;
+  if(a!==b){roleMsg('The two passwords do not match.','err');return;}
+  if(a.length<8){roleMsg('Use at least 8 characters.','err');return;}
+  const j=await(await fetch('/api/auth/set_password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({new_password:a})})).json();
+  if(j.ok){_auth=j;applyRole();closeAdminModal();}
+  else roleMsg(j.error||'Could not set the password','err');
+}
+async function doAdminLogout(){
+  const j=await(await fetch('/api/auth/logout',{method:'POST'})).json();
+  if(j.ok)_auth=j;
+  applyRole();
+}
+// Re-check periodically so the idle timeout is reflected in the UI rather than
+// only surfacing as a surprise 403 when someone finally clicks something.
+refreshRole();
+setInterval(refreshRole,60000);
+</script>
 %(extra_js)s
 <script>
 // Poll global status and update nav pill
@@ -1190,21 +1767,33 @@ _LANDING_HTML = _render_head("Station Home", tab_home="active") + r"""
 
 
 # ── HiPot page ─────────────────────────────────────────────────────────────────
+# Two faces, one page. An operator sees a list of sequences an admin approved and
+# a Run button; the parameter fields simply are not in their DOM-visible set.
+# An admin additionally sees the builder that creates those sequences, plus the
+# connection settings. Everything gated carries .admin-only — see the CSS note
+# in the shared chrome about why that class hides by default.
 _HIPOT_HTML = _render_head("HiPot — V71", tab_hipot="active") + r"""
 <main class="app-main">
   <div class="layout-2col">
     <div class="col-left">
       <div class="card">
         <h2>Connection</h2>
-        <label>Interface</label>
-        <select id="iface" onchange="document.getElementById('serial-opts').style.display=this.value==='serial'?'':'none'">
-          <option value="usb">USB (HID-to-UART)</option>
-          <option value="serial">RS-232 / COM Port</option>
-        </select>
-        <div id="serial-opts" style="display:none">
-          <label>COM Port</label><input id="com-port" value="COM1">
-          <label>Baud Rate</label>
-          <select id="baud"><option value="115200" selected>115200</option><option>57600</option><option>19200</option></select>
+        <div id="conn-summary" style="font-size:.78rem;color:var(--text-muted);margin-bottom:8px;"></div>
+        <div class="admin-only">
+          <label>Interface</label>
+          <select id="iface" onchange="document.getElementById('serial-opts').style.display=this.value==='serial'?'':'none'">
+            <option value="usb">USB (HID-to-UART)</option>
+            <option value="serial">RS-232 / COM Port</option>
+          </select>
+          <div id="serial-opts" style="display:none">
+            <label>COM Port</label><input id="com-port" value="COM1">
+            <label>Baud Rate</label>
+            <select id="baud"><option value="115200" selected>115200</option><option>57600</option><option>19200</option></select>
+          </div>
+          <div style="font-size:.7rem;color:var(--text-muted);margin-top:4px;">
+            Connecting as admin saves these as the station defaults. Operators
+            connect on these settings without being able to change them.
+          </div>
         </div>
         <div class="btn-row">
           <button class="btn-primary" id="btn-connect" onclick="doConnect()">Connect</button>
@@ -1212,6 +1801,7 @@ _HIPOT_HTML = _render_head("HiPot — V71", tab_hipot="active") + r"""
         </div>
         <div id="idn-info" style="font-size:.76rem;color:var(--text-muted);margin-top:6px;"></div>
       </div>
+
       <div class="card">
         <h2>Test Parameters</h2>
         <label>Operator</label><input id="operator" placeholder="Name">
@@ -1219,8 +1809,29 @@ _HIPOT_HTML = _render_head("HiPot — V71", tab_hipot="active") + r"""
         <label>DUT Serial</label><input id="dut-serial">
         <label>Notes</label><input id="notes">
       </div>
+
       <div class="card">
-        <h2>Sequence Builder</h2>
+        <h2>Run Test</h2>
+        <label>Test Sequence</label>
+        <select id="saved-seq" onchange="showSavedSteps()"></select>
+        <div id="saved-seq-desc" style="font-size:.74rem;color:var(--text-muted);margin:6px 0;"></div>
+        <div id="saved-seq-steps" style="font-size:.78rem;"></div>
+        <div class="btn-row">
+          <button class="btn-green"  id="btn-run"   disabled onclick="doRunSaved()">▶ Run Sequence</button>
+          <button class="btn-red"    id="btn-abort" disabled onclick="doAbort()">■ Abort</button>
+          <button class="btn-orange" id="btn-cont"  disabled onclick="doCont()">▶▶ Cont</button>
+        </div>
+        <div id="run-msg"></div>
+      </div>
+
+      <div class="card admin-only">
+        <h2>Sequence Builder <span style="float:right;font-size:.7rem;color:var(--text-muted);font-weight:400;">admin</span></h2>
+        <label>Editing</label>
+        <select id="edit-seq" onchange="loadSeqIntoBuilder()">
+          <option value="">— New sequence —</option>
+        </select>
+        <label>Name</label><input id="seq-name" placeholder="e.g. PEC-0063 Production Hipot">
+        <label>Description</label><input id="seq-desc" placeholder="What this sequence is for">
         <label>Add Step</label>
         <select id="new-step-type">
           <option value="ACW">ACW — AC Withstand</option>
@@ -1232,13 +1843,18 @@ _HIPOT_HTML = _render_head("HiPot — V71", tab_hipot="active") + r"""
         <button class="btn-muted" onclick="addStep()">+ Add Step</button>
         <div id="steps-list" style="margin-top:8px;"></div>
         <div class="btn-row">
-          <button class="btn-green"  id="btn-run"   disabled onclick="doRun()">▶ Run</button>
-          <button class="btn-red"    id="btn-abort" disabled onclick="doAbort()">■ Abort</button>
-          <button class="btn-orange" id="btn-cont"  disabled onclick="doCont()">▶▶ Cont</button>
+          <button class="btn-primary" onclick="saveSequence()">💾 Save Sequence</button>
+          <button class="btn-muted"   onclick="runAdHoc()">▶ Run Without Saving</button>
+          <button class="btn-red"     id="btn-del-seq" disabled onclick="retireSequence()">Retire</button>
         </div>
-        <div id="run-msg"></div>
+        <div id="builder-msg"></div>
+        <div style="font-size:.7rem;color:var(--text-muted);margin-top:6px;">
+          Retiring hides a sequence from operators but keeps the definition, so
+          results recorded against it stay traceable.
+        </div>
       </div>
     </div>
+
     <div class="col-right">
       <div class="card">
         <h2>Live Measurements</h2>
@@ -1260,15 +1876,22 @@ _HIPOT_HTML = _render_head("HiPot — V71", tab_hipot="active") + r"""
     </div>
   </div>
 </main>
-""" + _HTML_FOOT % dict(extra_js=r"""<script>
-let _stepUid=0,_pollTimer=null,_running=false;
+""" + _HTML_FOOT.replace("%(extra_js)s", r"""<script>
+let _stepUid=0,_pollTimer=null,_running=false,_sequences=[];
 
-function addStep(){
-  const type=document.getElementById('new-step-type').value,uid=_stepUid++;
+// ── Sequence builder (admin) ─────────────────────────────────────────────────
+function addStep(type,values){
+  type=type||document.getElementById('new-step-type').value;
+  const uid=_stepUid++;
   const list=document.getElementById('steps-list');
   const div=document.createElement('div');div.className='step-item';div.id=`step-${uid}`;div.dataset.type=type;
   div.innerHTML=`<button class="del-step" onclick="removeStep(${uid})">✕</button><h4></h4>${fieldHtml(type,uid)}`;
-  list.appendChild(div);renumber();
+  list.appendChild(div);
+  if(values)div.querySelectorAll('input').forEach(i=>{
+    const k=i.name.replace(/^steps\[\d+\]\./,'');
+    if(values[k]!==undefined&&values[k]!==null)i.value=values[k];
+  });
+  renumber();
 }
 function removeStep(uid){document.getElementById(`step-${uid}`)?.remove();renumber();}
 function renumber(){document.querySelectorAll('#steps-list .step-item').forEach((el,i)=>el.querySelector('h4').textContent=`Step ${i+1}: ${el.dataset.type}`);}
@@ -1285,50 +1908,162 @@ function collectSteps(){
   const out=[];
   document.querySelectorAll('#steps-list .step-item').forEach(item=>{
     const obj={type:item.dataset.type};
-    item.querySelectorAll('input').forEach(i=>{const k=i.name.replace(/^steps\[\d+\]\./,'');if(k)obj[k]=i.value;});
+    item.querySelectorAll('input').forEach(i=>{const k=i.name.replace(/^steps\[\d+\]\./,'');if(k&&i.value!=='')obj[k]=i.value;});
     out.push(obj);
   });
   return out;
 }
+function clearBuilder(){document.getElementById('steps-list').innerHTML='';_stepUid=0;}
+
+async function saveSequence(){
+  const name=document.getElementById('seq-name').value.trim();
+  const steps=collectSteps();
+  if(!name){showMsg('builder-msg','Give the sequence a name.','err');return;}
+  if(!steps.length){showMsg('builder-msg','Add at least one step.','err');return;}
+  const editing=document.getElementById('edit-seq').value;
+  const payload={name,description:document.getElementById('seq-desc').value,steps};
+  const url=editing?`/api/sequences/${editing}`:'/api/sequences';
+  const j=await(await fetch(url,{method:editing?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
+  if(j.ok){showMsg('builder-msg',editing?'Sequence updated.':'Sequence saved.','ok');await loadSequences();}
+  else showMsg('builder-msg',j.error||'Save failed','err');
+}
+async function retireSequence(){
+  const id=document.getElementById('edit-seq').value;if(!id)return;
+  const j=await(await fetch(`/api/sequences/${id}`,{method:'DELETE'})).json();
+  if(j.ok){showMsg('builder-msg','Sequence retired.','ok');document.getElementById('edit-seq').value='';clearBuilder();await loadSequences();}
+  else showMsg('builder-msg',j.error||'Could not retire','err');
+}
+function loadSeqIntoBuilder(){
+  const id=document.getElementById('edit-seq').value;
+  document.getElementById('btn-del-seq').disabled=!id;
+  clearBuilder();
+  if(!id){document.getElementById('seq-name').value='';document.getElementById('seq-desc').value='';return;}
+  const seq=_sequences.find(s=>String(s.id)===String(id));if(!seq)return;
+  document.getElementById('seq-name').value=seq.name||'';
+  document.getElementById('seq-desc').value=seq.description||'';
+  (seq.steps||[]).forEach(st=>addStep(st.type,st));
+}
+
+// ── Saved sequences (both roles) ─────────────────────────────────────────────
+async function loadSequences(){
+  const j=await(await fetch('/api/sequences?instrument=hipot')).json();
+  if(!j.ok)return;
+  _sequences=j.sequences||[];
+  const run=document.getElementById('saved-seq'),edit=document.getElementById('edit-seq');
+  const keepRun=run.value,keepEdit=edit.value;
+  run.innerHTML='';edit.innerHTML='<option value="">— New sequence —</option>';
+  if(!_sequences.length){
+    const o=document.createElement('option');o.value='';
+    o.textContent='No sequences set up yet';run.appendChild(o);
+  }
+  _sequences.forEach(s=>{
+    const o=document.createElement('option');o.value=s.id;
+    o.textContent=`${s.name}  (rev ${s.revision}, ${(s.steps||[]).length} steps)`;
+    run.appendChild(o);
+    edit.appendChild(o.cloneNode(true));
+  });
+  if(keepRun)run.value=keepRun;
+  if(keepEdit)edit.value=keepEdit;
+  showSavedSteps();
+  updateRunButton();
+}
+function showSavedSteps(){
+  const id=document.getElementById('saved-seq').value;
+  const seq=_sequences.find(s=>String(s.id)===String(id));
+  const desc=document.getElementById('saved-seq-desc');
+  const box=document.getElementById('saved-seq-steps');
+  if(!seq){desc.textContent=_sequences.length?'':'An admin needs to set up a test sequence before tests can be run.';box.innerHTML='';updateRunButton();return;}
+  desc.textContent=seq.description||'';
+  box.innerHTML='<table class="results-table"><thead><tr><th>#</th><th>Type</th><th>Parameters</th></tr></thead><tbody>'+
+    (seq.steps||[]).map((st,i)=>{
+      const params=Object.entries(st).filter(([k])=>k!=='type').map(([k,v])=>`${k}=${v}`).join(', ');
+      return `<tr><td>${i+1}</td><td>${st.type}</td><td style="font-size:.72rem;">${params||'—'}</td></tr>`;
+    }).join('')+'</tbody></table>';
+  updateRunButton();
+}
+
+// ── Connection ───────────────────────────────────────────────────────────────
+async function loadConnSettings(){
+  const j=await(await fetch('/api/settings/connection')).json();
+  if(!j.ok)return;
+  const c=j.settings.hipot||{};
+  document.getElementById('conn-summary').textContent=
+    c.mode==='serial'?`Configured: RS-232 · ${c.port} · ${c.baud} baud`:'Configured: USB (HID-to-UART)';
+  const iface=document.getElementById('iface');
+  if(iface){
+    iface.value=c.mode||'usb';
+    document.getElementById('serial-opts').style.display=c.mode==='serial'?'':'none';
+    if(c.port)document.getElementById('com-port').value=c.port;
+    if(c.baud)document.getElementById('baud').value=c.baud;
+  }
+}
 async function doConnect(){
-  const mode=document.getElementById('iface').value;
-  const p={instrument:'hipot',mode};
-  if(mode==='serial'){p.port=document.getElementById('com-port').value;p.baud=document.getElementById('baud').value;}
+  const p={instrument:'hipot'};
+  if(_auth.is_admin){
+    p.mode=document.getElementById('iface').value;
+    if(p.mode==='serial'){p.port=document.getElementById('com-port').value;p.baud=document.getElementById('baud').value;}
+  }
   const j=await(await fetch('/api/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})).json();
-  if(j.ok){setConn(true);document.getElementById('idn-info').textContent=`${j.idn.manufacturer} ${j.idn.model}  S/N:${j.idn.serial}  FW:${j.idn.firmware}`;showMsg('run-msg',`Connected to ${j.idn.model}`,'ok');}
+  if(j.ok){setConn(true);document.getElementById('idn-info').textContent=`${j.idn.manufacturer} ${j.idn.model}  S/N:${j.idn.serial}  FW:${j.idn.firmware}`;showMsg('run-msg',`Connected to ${j.idn.model}`,'ok');loadConnSettings();}
   else showMsg('run-msg','Connect failed: '+j.error,'err');
 }
 async function doDisconnect(){await fetch('/api/disconnect',{method:'POST'});setConn(false);document.getElementById('idn-info').textContent='';}
 function setConn(c){
   document.getElementById('btn-connect').disabled=c;
   document.getElementById('btn-disconnect').disabled=!c;
-  document.getElementById('btn-run').disabled=!c;
+  window._connected=c;
+  updateRunButton();
 }
-async function doRun(){
-  const steps=collectSteps();if(!steps.length){showMsg('run-msg','Add at least one step','err');return;}
-  const p={operator:document.getElementById('operator').value,part_number:document.getElementById('part-number').value,serial_number:document.getElementById('dut-serial').value,notes:document.getElementById('notes').value,steps};
-  const j=await(await fetch('/api/hipot/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})).json();
-  if(j.ok){showMsg('run-msg',`Session #${j.session_id} started`,'ok');document.getElementById('btn-run').disabled=true;document.getElementById('btn-abort').disabled=false;_running=true;startPoll();}
-  else showMsg('run-msg','Error: '+j.error,'err');
+function updateRunButton(){
+  const hasSeq=!!document.getElementById('saved-seq').value;
+  document.getElementById('btn-run').disabled=!(window._connected&&hasSeq&&!_running);
+}
+
+// ── Running ──────────────────────────────────────────────────────────────────
+function runMeta(){return{
+  operator:document.getElementById('operator').value,
+  part_number:document.getElementById('part-number').value,
+  serial_number:document.getElementById('dut-serial').value,
+  notes:document.getElementById('notes').value};}
+
+async function doRunSaved(){
+  const id=document.getElementById('saved-seq').value;
+  if(!id){showMsg('run-msg','Select a test sequence first.','err');return;}
+  await startRun('/api/hipot/run_sequence',{...runMeta(),sequence_id:Number(id)});
+}
+async function runAdHoc(){
+  const steps=collectSteps();
+  if(!steps.length){showMsg('builder-msg','Add at least one step.','err');return;}
+  await startRun('/api/hipot/run',{...runMeta(),steps});
+}
+async function startRun(url,payload){
+  const j=await(await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
+  if(j.ok){
+    showMsg('run-msg',`Session #${j.session_id} started`,'ok');
+    _running=true;updateRunButton();
+    document.getElementById('btn-abort').disabled=false;
+    startPoll();
+  } else showMsg('run-msg','Error: '+j.error,'err');
 }
 async function doAbort(){await fetch('/api/hipot/abort',{method:'POST'});}
 async function doCont(){await fetch('/api/hipot/cont',{method:'POST'});}
 function startPoll(){if(_pollTimer)clearInterval(_pollTimer);_pollTimer=setInterval(poll,500);}
 async function poll(){
   const j=await(await fetch('/api/hipot/status')).json();
-  if(!j.connected){clearInterval(_pollTimer);return;}
+  if(!j.connected){clearInterval(_pollTimer);setConn(false);return;}
+  setConn(true);
   document.getElementById('run-status').textContent=j.running?`Running — step ${j.current_step}`:'Idle';
   document.getElementById('btn-abort').disabled=!j.running;
   document.getElementById('btn-cont').disabled=!j.running;
-  document.getElementById('btn-run').disabled=j.running;
   const prog=document.getElementById('step-progress');prog.innerHTML='';
   (j.step_status||'').split('').forEach((ch,i)=>{const b=document.createElement('span');b.className='step-badge '+(ch==='?'?'running':ch);b.textContent=`S${i+1}:${ch==='?'?'…':ch}`;prog.appendChild(b);});
   if(j.running){
+    _running=true;updateRunButton();
     const lr=await(await fetch('/api/hipot/live')).json();
     document.getElementById('lv-volts').textContent=lr.volts!=null?lr.volts.toExponential(3):'—';
     document.getElementById('lv-amps').textContent=lr.amps!=null?lr.amps.toExponential(3):'—';
     document.getElementById('lv-ohms').textContent=lr.ohms!=null?lr.ohms.toExponential(3):'—';
-  } else if(_running){_running=false;clearInterval(_pollTimer);loadHistory();}
+  } else if(_running){_running=false;updateRunButton();clearInterval(_pollTimer);loadHistory();}
 }
 function showMsg(id,txt,type){document.getElementById(id).innerHTML=`<div class="msg ${type}">${txt}</div>`;}
 async function loadHistory(){
@@ -1337,8 +2072,278 @@ async function loadHistory(){
   const tb=document.getElementById('hist-body');tb.innerHTML='';
   r.sessions.forEach(row=>{const p=row.passed;const cls=p===1?'pass':p===0?'fail':'';const tag=p===1?'<span class="tag-pass">✓</span>':p===0?'<span class="tag-fail">✗</span>':'—';const tr=document.createElement('tr');tr.className=cls;tr.innerHTML=`<td>${row.id}</td><td>${(row.started_at||'').slice(0,16)}</td><td>${row.part_number||'—'}/${row.serial_number||'—'}</td><td>${tag}</td><td><a href="/api/export/${row.id}" style="color:var(--primary);font-size:.72rem;">⬇</a></td>`;tb.appendChild(tr);});
 }
-loadHistory();
+
+// Reload the sequence list on role change: an admin also sees retired ones.
+document.addEventListener('rolechange',()=>{loadSequences();loadConnSettings();});
+loadSequences();loadHistory();loadConnSettings();
 setInterval(async()=>{if(!_running){const j=await(await fetch('/api/hipot/status')).json();if(j.running){_running=true;startPoll();}}},2000);
+</script>""")
+
+
+# ── PVD verification page ──────────────────────────────────────────────────────
+# The V7X cannot be told to run its own AUTO PVD routine over the interface, so
+# this page drives the equivalent verification as a programmed sequence and
+# shows the operator the same lead-connection prompts the front panel would.
+_PVD_HTML = _render_head("PVD Verification", tab_pvd="active") + r"""
+<main class="app-main">
+  <div class="layout-2col">
+    <div class="col-left">
+      <div class="card" id="pvd-operator-notice" style="display:none;">
+        <h2>Verification is Admin-Controlled</h2>
+        <p style="font-size:.82rem;color:var(--text-muted);line-height:1.6;">
+          Running a performance verification decides whether this instrument is
+          fit to certify product, so it is a controlled activity. The history
+          below is visible to everyone; starting a verification requires an
+          admin login.
+        </p>
+      </div>
+
+      <div class="card admin-only">
+        <h2>Verification Setup <span style="float:right;font-size:.7rem;color:var(--text-muted);font-weight:400;">admin</span></h2>
+        <label>Profile</label>
+        <select id="pvd-profile" onchange="loadProfile()"></select>
+        <div id="pvd-profile-desc" style="font-size:.74rem;color:var(--text-muted);margin:6px 0;"></div>
+        <label>Mode</label>
+        <select id="pvd-mode">
+          <option value="verify">Verify — issue PASS / FAIL</option>
+          <option value="baseline">Baseline — record values, no verdict</option>
+        </select>
+        <label>Operator</label><input id="pvd-operator" placeholder="Name">
+        <label>APVD Serial</label><input id="pvd-serial" placeholder="e.g. APVD-74 SN1234">
+        <label>Notes</label><input id="pvd-notes">
+        <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-weight:400;">
+          <input type="checkbox" id="pvd-simulate" style="width:auto;margin:0;">
+          <span style="font-size:.76rem;color:var(--text-muted);">Dry run (no instrument, no high voltage)</span>
+        </label>
+        <div class="btn-row">
+          <button class="btn-green" id="pvd-btn-start" onclick="pvdStart()">▶ Start Verification</button>
+          <button class="btn-red"   id="pvd-btn-stop" disabled onclick="pvdStop()">■ Abort</button>
+        </div>
+        <div id="pvd-msg"></div>
+      </div>
+
+      <div class="card" id="pvd-currency-card">
+        <h2>Instrument Currency</h2>
+        <div id="pvd-currency" style="font-size:.8rem;color:var(--text-muted);">Checking…</div>
+        <div style="font-size:.7rem;color:var(--text-muted);margin-top:6px;">
+          Informational only — this app does not block production testing on an
+          overdue verification. That call belongs to the quality procedure.
+        </div>
+      </div>
+
+      <div class="card admin-only">
+        <h2>Profile Points</h2>
+        <table class="results-table"><thead><tr>
+          <th>Point</th><th>Type</th><th>Nominal</th><th>Tol</th>
+        </tr></thead><tbody id="pvd-points-body"></tbody></table>
+      </div>
+    </div>
+
+    <div class="col-right">
+      <div class="card" id="pvd-prompt-card" style="display:none;border-color:var(--primary);">
+        <h2 id="pvd-prompt-title">Connect the APVD</h2>
+        <div id="pvd-prompt-danger" class="msg err" style="display:none;"></div>
+        <ol id="pvd-prompt-list" style="margin:8px 0 8px 20px;font-size:.86rem;line-height:1.7;"></ol>
+        <div class="btn-row">
+          <button class="btn-primary" onclick="pvdAck()">✓ Connections Made — Continue</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Live Results <span id="pvd-overall" class="status-pill" style="float:right;">Idle</span></h2>
+        <div id="pvd-state" style="font-size:.8rem;color:var(--text-muted);margin-bottom:8px;">Idle</div>
+        <table class="results-table"><thead><tr>
+          <th>Point</th><th>Type</th><th>Measured</th><th>Nominal</th><th>Dev</th><th>Result</th>
+        </tr></thead><tbody id="pvd-live-body"></tbody></table>
+        <div id="pvd-promote" style="display:none;margin-top:10px;">
+          <div class="msg" style="background:var(--bg-elev-2);">
+            Baseline captured. Promoting adopts these readings as the profile
+            nominals — only do this if the V71 is inside its calibration period.
+          </div>
+          <div class="btn-row">
+            <label style="font-weight:400;font-size:.76rem;">Tolerance ±</label>
+            <input id="pvd-tol" value="10" style="width:70px;">
+            <span style="font-size:.76rem;align-self:center;">percent</span>
+            <button class="btn-orange" onclick="pvdPromote()">Promote to Nominals</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Verification History
+          <a href="/api/export" style="float:right;font-size:.76rem;color:var(--primary);text-decoration:none;">⬇ Export</a>
+        </h2>
+        <table class="results-table"><thead><tr>
+          <th>#</th><th>Date</th><th>Profile</th><th>Mode</th><th>Operator</th><th>Result</th>
+        </tr></thead><tbody id="pvd-hist-body"></tbody></table>
+      </div>
+    </div>
+  </div>
+</main>
+""" + _HTML_FOOT.replace("%(extra_js)s", r"""<script>
+let _pvdTimer=null,_pvdLastRun=null,_pvdProfile=null;
+
+function fmt(v,unit){
+  if(v===null||v===undefined)return '—';
+  const n=Number(v);
+  if(!isFinite(n))return '—';
+  // Leakage currents live around microamps; resistances around ohms. Exponential
+  // for the very small, fixed notation for everything a human reads as a number.
+  const s=(Math.abs(n)<0.01&&n!==0)?n.toExponential(3):n.toPrecision(5);
+  return unit?`${s} ${unit==='ohm'?'Ω':unit}`:s;
+}
+function verdictTag(v){
+  if(v==='PASS')return '<span class="tag-pass">PASS</span>';
+  if(v==='FAIL')return '<span class="tag-fail">FAIL</span>';
+  if(v==='SKIPPED')return '<span style="color:var(--text-muted);font-size:.72rem;">skipped</span>';
+  return `<span style="color:#f57f17;font-size:.72rem;font-weight:700;">${v}</span>`;
+}
+
+async function loadProfileList(){
+  const j=await(await fetch('/api/pvd/profiles')).json();
+  if(!j.ok)return;
+  const sel=document.getElementById('pvd-profile');sel.innerHTML='';
+  j.profiles.forEach(p=>{
+    const o=document.createElement('option');o.value=p.id;
+    o.textContent=`${p.name}${p.baselined?'':'  (not baselined)'}`;
+    sel.appendChild(o);
+  });
+  loadProfile();
+}
+async function loadProfile(){
+  const id=document.getElementById('pvd-profile').value;if(!id)return;
+  const j=await(await fetch('/api/pvd/profile/'+id)).json();
+  if(!j.ok)return;
+  _pvdProfile=j.profile;
+  document.getElementById('pvd-profile-desc').textContent=j.profile.description||'';
+  const tb=document.getElementById('pvd-points-body');tb.innerHTML='';
+  const dtol=j.profile.default_tol_pct;
+  (j.profile.points||[]).forEach(p=>{
+    const tol=p.tol_abs!=null?`±${fmt(p.tol_abs,p.unit)}`:`±${p.tol_pct!=null?p.tol_pct:dtol}%`;
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${p.name}</td><td>${p.type}</td>`+
+                 `<td>${p.nominal==null?'<em style="color:#f57f17;">not set</em>':fmt(p.nominal,p.unit)}</td>`+
+                 `<td>${p.nominal==null?'—':tol}</td>`;
+    tb.appendChild(tr);
+  });
+  loadCurrency();
+}
+async function loadCurrency(){
+  const id=document.getElementById('pvd-profile').value;
+  const j=await(await fetch('/api/pvd/verification_status?profile_id='+encodeURIComponent(id))).json();
+  const el=document.getElementById('pvd-currency');
+  if(!j.ok){el.textContent='—';return;}
+  if(!j.verified){el.innerHTML='<span style="color:#b71c1c;font-weight:700;">Never verified</span> — no passing run on record for this profile.';return;}
+  const age=j.age_hours!=null?`${j.age_hours.toFixed(1)} h ago`:'';
+  const due=j.due?'<span style="color:#b71c1c;font-weight:700;">OVERDUE</span>':'<span style="color:#2e7d32;font-weight:700;">current</span>';
+  el.innerHTML=`Last passed run #${j.run_id} — ${(j.last_passed_at||'').slice(0,16).replace('T',' ')} (${age}) · ${due}`+
+               (j.interval_hours?` · interval ${j.interval_hours} h`:'');
+}
+
+async function pvdStart(){
+  const p={
+    profile_id:document.getElementById('pvd-profile').value,
+    mode:document.getElementById('pvd-mode').value,
+    operator:document.getElementById('pvd-operator').value,
+    pvd_serial:document.getElementById('pvd-serial').value,
+    notes:document.getElementById('pvd-notes').value,
+    simulate:document.getElementById('pvd-simulate').checked
+  };
+  const j=await(await fetch('/api/pvd/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})).json();
+  if(!j.ok){showMsg('pvd-msg','Could not start: '+j.error,'err');return;}
+  document.getElementById('pvd-msg').innerHTML='';
+  document.getElementById('pvd-promote').style.display='none';
+  document.getElementById('pvd-btn-start').disabled=true;
+  document.getElementById('pvd-btn-stop').disabled=false;
+  startPvdPoll();
+}
+async function pvdAck(){await fetch('/api/pvd/ack',{method:'POST'});}
+async function pvdStop(){await fetch('/api/pvd/stop',{method:'POST'});}
+async function pvdPromote(){
+  if(!_pvdLastRun)return;
+  const tol=parseFloat(document.getElementById('pvd-tol').value);
+  const j=await(await fetch('/api/pvd/baseline/promote',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_id:_pvdLastRun,tol_pct:isFinite(tol)?tol:null})})).json();
+  if(j.ok){
+    showMsg('pvd-msg',`Promoted ${j.promoted.length} point(s) to nominals.`,'ok');
+    document.getElementById('pvd-promote').style.display='none';
+    loadProfileList();
+  } else showMsg('pvd-msg','Promote failed: '+j.error,'err');
+}
+
+function startPvdPoll(){if(_pvdTimer)clearInterval(_pvdTimer);_pvdTimer=setInterval(pvdPoll,400);pvdPoll();}
+async function pvdPoll(){
+  const j=await(await fetch('/api/pvd/status')).json();
+  const promptCard=document.getElementById('pvd-prompt-card');
+
+  if(j.state==='awaiting_connection'&&j.phase){
+    promptCard.style.display='';
+    document.getElementById('pvd-prompt-title').textContent=`Phase ${j.phase.id}: ${j.phase.name}`;
+    const dg=document.getElementById('pvd-prompt-danger');
+    if(j.phase.danger){dg.style.display='';dg.textContent='⚠ '+j.phase.danger;}else{dg.style.display='none';}
+    const ol=document.getElementById('pvd-prompt-list');ol.innerHTML='';
+    (j.phase.instructions||[]).forEach(t=>{const li=document.createElement('li');li.textContent=t;ol.appendChild(li);});
+  } else promptCard.style.display='none';
+
+  document.getElementById('pvd-state').textContent=
+    j.state==='running'?'Running…':
+    j.state==='awaiting_connection'?'Waiting for operator to connect the APVD':
+    j.state==='done'?`Finished in ${j.elapsed_s}s`:
+    j.state==='aborted'?'Aborted by operator':
+    j.state==='error'?('Error: '+(j.error||'')):'Idle';
+
+  const pill=document.getElementById('pvd-overall');
+  const ov=j.overall||(j.state==='running'||j.state==='awaiting_connection'?'RUNNING':'Idle');
+  pill.textContent=ov;
+  pill.className='status-pill'+(ov==='PASS'?' ok':(ov==='FAIL'||ov==='ERROR'?' err':''));
+
+  const tb=document.getElementById('pvd-live-body');tb.innerHTML='';
+  (j.results||[]).forEach(r=>{
+    const dev=r.deviation_pct!=null?`${r.deviation_pct>0?'+':''}${r.deviation_pct.toFixed(2)}%`:'—';
+    const tr=document.createElement('tr');
+    tr.className=r.verdict==='PASS'?'pass':(r.verdict==='FAIL'?'fail':'');
+    tr.innerHTML=`<td title="${r.reason||''}">${r.point_name||r.point_id}</td><td>${r.step_type||''}</td>`+
+                 `<td>${fmt(r.measured,r.unit)}</td><td>${fmt(r.nominal,r.unit)}</td>`+
+                 `<td>${dev}</td><td>${verdictTag(r.verdict)}</td>`;
+    tb.appendChild(tr);
+  });
+
+  if(['done','aborted','error','idle'].includes(j.state)){
+    clearInterval(_pvdTimer);_pvdTimer=null;
+    document.getElementById('pvd-btn-start').disabled=false;
+    document.getElementById('pvd-btn-stop').disabled=true;
+    _pvdLastRun=j.run_id;
+    if(j.overall==='BASELINE'&&j.mode==='baseline'&&j.run_id){
+      document.getElementById('pvd-promote').style.display='';
+    }
+    loadPvdHistory();loadCurrency();
+  }
+}
+
+async function loadPvdHistory(){
+  const j=await(await fetch('/api/pvd/results?limit=20')).json();
+  if(!j.ok)return;
+  const tb=document.getElementById('pvd-hist-body');tb.innerHTML='';
+  j.runs.forEach(r=>{
+    const tr=document.createElement('tr');
+    tr.className=r.passed===1?'pass':(r.passed===0?'fail':'');
+    tr.innerHTML=`<td>${r.id}</td><td>${(r.started_at||'').slice(0,16).replace('T',' ')}</td>`+
+                 `<td>${r.pvd_device||r.profile_id}</td><td>${r.mode}</td>`+
+                 `<td>${r.operator||'—'}</td><td>${verdictTag(r.overall||'—')}</td>`;
+    tb.appendChild(tr);
+  });
+}
+function showMsg(id,txt,type){document.getElementById(id).innerHTML=`<div class="msg ${type}">${txt}</div>`;}
+
+document.addEventListener('rolechange',e=>{
+  document.getElementById('pvd-operator-notice').style.display=e.detail.is_admin?'none':'';
+  if(e.detail.is_admin)loadProfileList();
+});
+loadProfileList();loadPvdHistory();
+// Recover the view if the page is reloaded mid-verification.
+(async()=>{const j=await(await fetch('/api/pvd/status')).json();
+  if(['running','awaiting_connection'].includes(j.state)){
+    document.getElementById('pvd-btn-start').disabled=true;
+    document.getElementById('pvd-btn-stop').disabled=false;startPvdPoll();}})();
 </script>""")
 
 

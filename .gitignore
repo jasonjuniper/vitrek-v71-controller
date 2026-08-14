@@ -10,3 +10,6 @@ venv/
 
 # Large installer - excluded from git
 software/QT Insite/
+
+# Cowork device-mount artefacts
+.fuse_hidden*

@@ -63,6 +63,8 @@ DOCS = [
     (os.path.join(DOCS_DIR,   'logo-soft-comfort-guide.md'),    'logo-soft-comfort-guide.pdf'),
     (os.path.join(DOCS_DIR,   'hmi-architecture.md'),           'hmi-architecture.pdf'),
     (os.path.join(DOCS_DIR,   'sourcing-list.md'),              'sourcing-list.pdf'),
+    (os.path.join(DOCS_DIR,   'pvd-verification.md'),           'pvd-verification.pdf'),
+    (os.path.join(DOCS_DIR,   'access-control.md'),             'access-control.pdf'),
 ]
 
 PAGE_SIZE_CSS = 'Letter'

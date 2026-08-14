@@ -48,6 +48,46 @@ _SLAB_HID_DLL = os.path.join(_DLL_DIR, "SLABHIDtoUART.dll")
 _SLAB_DEV_DLL = os.path.join(_DLL_DIR, "SLABHIDDevice.dll")
 
 
+# Characters the V7X front panel can display in a HOLD message (see the
+# "Entry of a name or message" note in Section 4 of the operating manual).
+_V7X_MESSAGE_CHARS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ#%&:()*+-./<=>@0123456789 ")
+
+
+def sanitize_message(text: str, max_len: int = 20) -> str:
+    """Coerce arbitrary text into something the V7X front panel can display."""
+    out = "".join(c for c in (text or "").upper() if c in _V7X_MESSAGE_CHARS)
+    return out.strip()[:max_len]
+
+
+# Test modes each V7X model can actually perform. A verification profile point
+# whose mode is not in this list is skipped rather than rejected by the
+# instrument with an ERR 2 ("step type not supported by this instrument model").
+MODEL_CAPABILITIES = {
+    "V70": ("ACW", "CONT"),
+    "V71": ("ACW", "DCW", "CONT"),
+    "V73": ("ACW", "DCW", "IR", "CONT"),
+    "V74": ("ACW", "DCW", "IR", "CONT", "GB"),
+    "V75": ("ACW", "DCW", "IR", "CONT"),
+    "V76": ("ACW", "DCW", "IR", "CONT"),
+    "V77": ("ACW", "DCW", "IR", "CONT", "GB"),
+    "V79": ("CONT", "GB"),
+}
+
+
+def capabilities_for_model(model: str) -> tuple:
+    """
+    Return the tuple of supported test modes for a model string from *IDN?.
+
+    Falls back to the most conservative common set if the model is unknown, so
+    an unrecognised instrument never has an unsupported step pushed at it.
+    """
+    key = (model or "").strip().upper()
+    for name, caps in MODEL_CAPABILITIES.items():
+        if name in key:
+            return caps
+    return ("ACW", "CONT")
+
+
 class V71Error(Exception):
     """Raised when the V71 returns an error or communication fails."""
 
@@ -336,6 +376,32 @@ class V71Driver:
         max_field = f"{max_ohm}" if max_ohm is not None else ""
         cmd = f"ADD,CONT,{test_time_s},{min_field},{max_field}"
         self.add_step(cmd)
+
+    def add_pause_step(self, pause_s: float) -> None:
+        """
+        Add a PAUSE step — the sequence simply waits, no operator action needed.
+        Manual: ADD,PAUSE,<seconds>
+        """
+        self.add_step(f"ADD,PAUSE,{pause_s}")
+
+    def add_hold_step(self, timeout_s: float, line1: str = "", line2: str = "") -> None:
+        """
+        Add a HOLD step — the V7X displays up to two message lines on the front
+        panel and waits for the operator (or a CONT command) before continuing.
+
+        Used by the PVD verification runner to prompt for a lead change between
+        verification phases without tearing down the sequence.
+
+        Manual: ADD,HOLD,<timeout_s>,<1st message line>,<2nd message line>
+
+        The V7X character set for on-screen messages is limited to
+        ABCDEFGHIJKLMNOPQRSTUVWXYZ#%&:()*+-./<=>@0123456789 and space, so the
+        message lines are upper-cased and stripped of anything else. Commas are
+        removed too — they are the protocol field separator.
+        """
+        self.add_step(
+            f"ADD,HOLD,{timeout_s},{sanitize_message(line1)},{sanitize_message(line2)}"
+        )
 
     def name_sequence(self, name: str) -> None:
         """Set the name of the active test sequence."""

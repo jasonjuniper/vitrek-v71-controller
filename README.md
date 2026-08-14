@@ -1,8 +1,12 @@
 <p align="center"><img src="assets/juniper-banner.svg" alt="JUNIPER · Lighting · Power Solutions · Systems" width="900"></p>
 
-# Vitrek V71 HiPot Controller
+# Juniper Automated Test Station
 
-A Python/Flask web application for controlling the **Vitrek V71 Hi-Pot Tester** over USB (HID-to-UART) or RS-232. Runs test sequences, stores results in a local SQLite database, and exports to Excel for SharePoint sync. Built at [Juniper Design](https://juniperdesign.com).
+A Python/Flask application driving the Juniper test bench: the **Vitrek V71
+Hi-Pot Tester** over USB or RS-232, a **Siglent SDL1020X-E** DC electronic load,
+and an always-on **Siemens LOGO! PLC** thermal rig. Results are stored in SQLite
+and exported to a branded Excel workbook for SharePoint. Built at
+[Juniper Design](https://juniperdesign.com).
 
 > 📄 **Print-ready PDF:** [`docs/pdf/README.pdf`](docs/pdf/README.pdf)
 
@@ -10,47 +14,85 @@ A Python/Flask web application for controlling the **Vitrek V71 Hi-Pot Tester** 
 
 ## Features
 
-- **USB and RS-232 support** — USB via Silicon Labs CP2110 HID-to-UART DLL (SLABHIDtoUART.dll); RS-232 via pyserial
-- **Full V7X command set** — ACW, DCW, IR, GB, CONT test steps; sequence management; live measurements
-- **Web UI** — browser-based interface, no installation needed on operator machines (just open `http://localhost:5000`)
-- **SQLite results database** — every test session and step result persisted locally
-- **Excel export** — formatted, color-coded workbook per session or bulk; ready for SharePoint
+- **Two access levels** — operators run approved sequences with no login; admins
+  define them. See [`docs/access-control.md`](docs/access-control.md)
+- **Saved test sequences** — reviewed, versioned definitions rather than
+  parameters typed at the bench
+- **Instrument verification (PVD)** — daily performance verification against a
+  Vitrek APVD, with the actual measured values recorded, not just a pass light.
+  See [`docs/pvd-verification.md`](docs/pvd-verification.md)
+- **USB and RS-232** — USB via the Silicon Labs CP2110 HID-to-UART DLL; RS-232
+  via pyserial
+- **Full V7X command set** — ACW, DCW, IR, GB, CONT, PAUSE, HOLD steps
+- **DC load + thermal rig** — SDL1020X-E load batteries, PEC-0063 thermal
+  qualification, continuous 1 Hz sensor recording
+- **Web UI** — nothing to install on operator machines, just open the page
+- **Excel export** — colour-coded workbook covering test sessions, thermal
+  qualification and instrument verification
 
 ---
 
 ## Quick Start
 
-### 1. Install dependencies
-
 ```bash
 pip install -r requirements.txt
-```
-
-### 2. Connect the V71
-
-- **USB**: Set `CONFIG MENU → INTERFACE = USB` on the V71 front panel. Connect the USB-B cable.
-- **RS-232**: Set `CONFIG MENU → INTERFACE = RS232` and matching baud rate. Use a 9-wire null-modem cable.
-
-### 3. Run the app
-
-```bash
 python app.py
 ```
 
-Open `http://localhost:5000` in your browser.
+Open `http://localhost:5000`.
+
+**Connect the V71:** set `CONFIG MENU → INTERFACE = USB` on the front panel and
+plug in the USB-B cable, or `= RS232` with a fully-wired 9-wire null-modem cable
+(hardware RTS/CTS handshaking is required).
+
+### First run
+
+1. Click **Set up admin** in the top bar and choose a password. It is stored only
+   as a PBKDF2 hash — keep the password itself in 1Password.
+2. As admin, open **HiPot → Sequence Builder** and create at least one sequence.
+   Operators cannot run anything until one exists.
+3. Baseline the PVD profile before relying on verification verdicts — see
+   [`docs/pvd-verification.md`](docs/pvd-verification.md).
+
+---
+
+## Instruments
+
+| Instrument | Interface | Notes |
+|---|---|---|
+| Vitrek V71 HiPot | USB HID-to-UART, or RS-232 | ACW, DCW and CONT modes only — no IR, no GB |
+| Siglent SDL1020X-E DC Load | TCP/LAN, VISA or USB CDC | |
+| Siemens LOGO! PLC + thermal rig | Modbus TCP | Always on, independent of instrument selection |
+
+Instrument selection is mutually exclusive — one at a time — but the thermal rig
+runs in parallel with any instrument test, and sensor data is continuously
+recorded so results can be correlated against the timeline.
 
 ---
 
 ## Project Structure
 
 ```
-├── app.py              Flask web app + REST API + embedded UI
-├── v71_driver.py       Low-level USB/serial driver (ctypes + pyserial)
-├── database.py         SQLite schema and CRUD
-├── excel_export.py     openpyxl Excel workbook generator
-├── requirements.txt
-├── hipot_results.db    SQLite database (auto-created on first run)
+├── app.py                Flask app: REST API + embedded UI for every page
+├── auth.py               Roles, admin password hashing, @admin_required
+├── v71_driver.py         V71 USB/serial driver (ctypes + pyserial)
+├── sdl1020x_driver.py    Siglent DC load driver
+├── pvd_test.py           Instrument verification runner
+├── pvd_profiles.json     Verification profiles (APVD-74 / APVD-7X)
+├── test_battery.py       Multi-step DC load test batteries
+├── pec0063_test.py       PEC-0063 thermal qualification
+├── database.py           SQLite schema and CRUD
+├── excel_export.py       Branded Excel workbook generator
+├── plc/                  LOGO! PLC driver, thermal controller, rig_config.json
+├── hipot_results.db      SQLite database (auto-created; gitignored)
 └── docs/
+    ├── access-control.md
+    ├── pvd-verification.md
+    ├── wiring-guide.md
+    ├── hmi-architecture.md
+    ├── plc-ladder-logic.md
+    ├── breadboard-prototype.md
+    ├── sourcing-list.md
     └── V7x_Series_Operating_Manual.pdf
 ```
 
@@ -58,84 +100,96 @@ Open `http://localhost:5000` in your browser.
 
 ## REST API
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/connect` | Connect to V71 (`{"mode":"usb"}` or `{"mode":"serial","port":"COM3","baud":115200}`) |
-| POST | `/api/disconnect` | Disconnect |
-| GET  | `/api/status` | Current connection + run state |
-| POST | `/api/run` | Start a test sequence (see below) |
-| POST | `/api/abort` | Abort running test |
-| POST | `/api/cont` | Continue from HOLD step |
-| GET  | `/api/live` | Live VOLTS/AMPS/OHMS during a run |
-| GET  | `/api/sessions` | Recent test sessions |
-| GET  | `/api/session/<id>` | Session detail + step results |
-| GET  | `/api/export` | Download all sessions as Excel |
-| GET  | `/api/export/<id>` | Download single session as Excel |
+Routes marked **admin** require an admin session; everything else is available
+to operators. Full detail in the two docs above.
 
-### Example: run a test via API
+### Auth and setup
 
-```json
-POST /api/run
-{
-  "operator": "Jason",
-  "part_number": "PCB-001",
-  "serial_number": "SN-12345",
-  "steps": [
-    { "type": "ACW", "voltage": 1500, "ramp": 2, "dwell": 60, "max_leakage": 0.005 },
-    { "type": "IR",  "voltage": 500,  "dwell": 60, "min_resistance": 100000000 },
-    { "type": "GB",  "current": 25,   "dwell": 5,  "max_ohm": 0.1 }
-  ]
-}
-```
+| Method | Endpoint | | Description |
+|---|---|---|---|
+| GET  | `/api/auth/status` | | Current role |
+| POST | `/api/auth/login` | | Elevate to admin |
+| POST | `/api/auth/logout` | | Drop to operator |
+| POST | `/api/auth/set_password` | | Set or change the admin password |
+| GET/POST | `/api/settings/connection` | admin to write | Saved connection settings |
+
+### Test sequences
+
+| Method | Endpoint | | Description |
+|---|---|---|---|
+| GET | `/api/sequences` | | List saved sequences |
+| POST | `/api/sequences` | admin | Create |
+| PUT | `/api/sequences/<id>` | admin | Update (bumps revision) |
+| DELETE | `/api/sequences/<id>` | admin | Retire (`?hard=1` deletes) |
+
+### HiPot
+
+| Method | Endpoint | | Description |
+|---|---|---|---|
+| POST | `/api/connect` | | Connect (operators use the saved settings) |
+| POST | `/api/disconnect` | | Disconnect |
+| POST | `/api/hipot/run_sequence` | | Run a saved sequence |
+| POST | `/api/hipot/run` | admin | Run ad-hoc steps |
+| POST | `/api/hipot/abort` · `/api/hipot/cont` | | Abort / continue |
+| GET | `/api/hipot/status` · `/api/hipot/live` | | Run state and live V/A/Ω |
+
+### Verification, results and export
+
+| Method | Endpoint | | Description |
+|---|---|---|---|
+| POST | `/api/pvd/start` · `/api/pvd/ack` · `/api/pvd/stop` | admin | Run a verification |
+| POST | `/api/pvd/baseline/promote` | admin | Adopt baseline measurements as nominals |
+| GET | `/api/pvd/results` · `/api/pvd/verification_status` | | Verification history and currency |
+| GET | `/api/sessions` · `/api/session/<id>` | | Test history |
+| GET | `/api/export` · `/api/export/<id>` | | Excel export |
 
 ---
 
 ## USB Communication Details
 
-The V71 uses a **Silicon Labs CP2110 HID-to-UART bridge**. Communication is handled through:
+The V71 uses a **Silicon Labs CP2110 HID-to-UART bridge**:
 
-- `SLABHIDtoUART.dll` + `SLABHIDDevice.dll` (x64 versions from `software/drivers/`)
-- USB VID: `4292` (0x10C4), PID: `34869` (0x8835)
-- UART config: 115200 baud, 8N1, RTS/CTS flow control
-- Protocol: ASCII commands terminated with `\r\n`
+- `SLABHIDtoUART.dll` + `SLABHIDDevice.dll` (x64, from `software/drivers/`)
+- USB VID `4292` (0x10C4), PID `34869` (0x8835)
+- 115200 baud, 8N1, RTS/CTS flow control
+- ASCII commands terminated with `\r\n`
 
-**Key commands** (from Section 6 of the operating manual):
+**Key commands** (Section 6 of the operating manual):
 
 | Command | Description |
-|---------|-------------|
-| `*IDN?` | Identify device |
-| `*RST` | Reset / clear |
-| `*ERR?` | Read error register |
-| `NOSEQ` | Clear active sequence |
-| `ADD,ACW,...` | Add ACW test step |
-| `ADD,DCW,...` | Add DCW test step |
-| `ADD,IR,...` | Add IR test step |
-| `ADD,GB,...` | Add Ground Bond step |
-| `ADD,CONT,...` | Add Continuity step |
-| `RUN` | Start active sequence |
-| `ABORT` | Abort running sequence |
-| `RUN?` | Query if running (0/1) |
-| `RSLT?` | Overall result bitmask |
-| `STAT?` | Per-step pass/fail string |
-| `STEPRSLT?,<n>` | Detailed results for step n |
-| `MEASRSLT?,AMPS` | Live current measurement |
-| `MEASRSLT?,VOLTS` | Live voltage measurement |
+|---|---|
+| `*IDN?` / `*RST` / `*ERR?` | Identify / reset / read error register |
+| `NOSEQ` | Clear and activate sequence #0 |
+| `ADD,ACW,…` `ADD,DCW,…` `ADD,IR,…` `ADD,GB,…` `ADD,CONT,…` | Add a test step |
+| `ADD,PAUSE,…` `ADD,HOLD,…` | Timed pause / operator prompt |
+| `RUN` · `ABORT` · `CONT` · `RUN?` | Execution control |
+| `RSLT?` · `STAT?` · `STEPRSLT?,<n>` | Overall, per-step and detailed results |
+| `MEASRSLT?,<AMPS\|VOLTS\|OHMS>` | Live measurement |
+
+There is **no remote command for AUTO PVD, SELF TEST or CAL VERIFY** — those are
+front-panel only, which is why verification is implemented as a programmed
+sequence. See [`docs/pvd-verification.md`](docs/pvd-verification.md).
 
 ---
 
 ## Excel Export
 
-Each export workbook contains:
-- **Summary sheet** — all sessions with pass/fail, sortable/filterable
-- **Per-session sheets** — full step results with color coding (green=pass, red=fail)
+One workbook, several sheets:
 
-The `.xlsx` file is suitable for direct upload or auto-sync to SharePoint.
+- **Summary** — all test sessions, sortable and filterable
+- **Per-session** — full step results, colour-coded
+- **PEC-0063 Thermal Results** — thermal qualification against the UL limits
+- **PVD Verification** — instrument verification, one row per measured point
+
+Suitable for direct upload or auto-sync to SharePoint.
 
 ---
 
 ## Notes
 
-- The DLL must be accessible at `software/drivers/USB_DLLs_and_Headers/USB DLLs and Headers/x64/`
-- The app must be compiled/run as **x64** to match the provided DLL architecture
-- After a DUT breakdown event on USB, the V71 may disconnect and reconnect — the driver detects this and surfaces an error; simply reconnect from the UI
-- RS-232 requires hardware handshaking (RTS/CTS) — ensure your cable is fully wired (9-wire null modem)
+- The DLLs must be present at `software/drivers/USB_DLLs_and_Headers/USB DLLs and Headers/x64/`, and the app must run as **x64** to match them
+- After a DUT breakdown on USB the V71 may disconnect and reconnect; the driver
+  surfaces the error — just reconnect from the UI
+- RS-232 requires hardware handshaking; a 3-wire cable will not work
+- `hipot_results.db` is gitignored: it holds the admin password verifier and the
+  session signing key, neither of which belongs in the repository

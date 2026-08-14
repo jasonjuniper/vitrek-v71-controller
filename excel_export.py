@@ -25,7 +25,8 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, Gradient
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.utils import get_column_letter
 
-from database import get_sessions, get_session, get_steps, get_thermal_tests, DB_PATH
+from database import (get_sessions, get_session, get_steps, get_thermal_tests,
+                      get_pvd_runs, get_pvd_run, ensure_pvd_tables, DB_PATH)
 
 # ── Juniper brand palette (ARGB hex, openpyxl format) ─────────────────────────
 J_NAVY        = "FF1A1A2E"   # brand bar / primary headers
@@ -146,11 +147,18 @@ def _write_title_banner(ws, num_cols: int, subtitle: str) -> int:
     Returns the next available row number.
     """
     # Row 1: navy brand bar — "JUNIPER DESIGN  ·  V71 HiPot Controller"
+    #
+    # The bar deliberately stops one column short. The "Generated" timestamp
+    # below sits in that last column; merging the bar across ALL columns first
+    # turns that cell into a MergedCell, whose .value is read-only, and openpyxl
+    # raises AttributeError the moment we try to write the timestamp — which
+    # took down every export before it wrote a single row.
+    bar_end = max(1, num_cols - 1)
     c1 = _navy_cell(ws, 1, 1, "JUNIPER DESIGN  ·  V71 HiPot Controller",
-                    size=13, span_end_col=num_cols)
+                    size=13, span_end_col=bar_end)
     ws.row_dimensions[1].height = 30
 
-    # Right-align a "Generated" timestamp in the same merged cell's last physical cell
+    # Right-aligned "Generated" timestamp, styled to read as part of the bar
     ts_cell = ws.cell(row=1, column=num_cols,
                       value=f"Generated {datetime.datetime.now():%Y-%m-%d %H:%M}")
     ts_cell.font      = Font(name=BRAND_FONT, size=8, color="FFAAAACC", italic=True)
@@ -451,11 +459,132 @@ def _write_pec0063_sheet(wb: openpyxl.Workbook, rows: list[dict]) -> None:
         ws.column_dimensions[get_column_letter(i)].width = w
 
 
+def _write_pvd_sheet(wb: openpyxl.Workbook, runs: list[dict]) -> None:
+    """
+    Write the Performance Verification (PVD) sheet.
+
+    One row per verification point, grouped under a header row per run, so an
+    auditor can see not just that the instrument passed on a given day but what
+    it actually measured and how far that sat from nominal. The verdict column
+    is colour-coded; BASELINE rows are amber because a baseline run is a
+    measurement exercise, not a passing verification.
+    """
+    ws = wb.create_sheet("PVD Verification")
+    ws.sheet_view.showGridLines = False
+
+    _navy_cell(ws, 1, 1, "Instrument Performance Verification — PVD Results",
+               size=13, span_end_col=11)
+    ws.row_dimensions[1].height = 22
+    _primary_cell(ws, 2, 1,
+                  "Vitrek V7X verified against an APVD Performance Verification Device · "
+                  "measured values evaluated against profile nominals in software",
+                  span_end_col=11)
+    ws.row_dimensions[2].height = 16
+
+    ws.cell(row=3, column=1, value="Reading this sheet").font = Font(
+        name=BRAND_FONT, bold=True, size=8, color=J_CHARCOAL)
+    notes = [
+        ("PASS", "Measured value inside the nominal ± tolerance window, with no instrument fault flags."),
+        ("FAIL", "Outside the window, or the instrument reported a fault flag on that step."),
+        ("BASELINE", "No nominal on record — the value was captured but no verdict was issued."),
+        ("SKIPPED", "The connected V7X model cannot perform that test mode (e.g. IR or GB on a V71)."),
+    ]
+    for offset, (tag, desc) in enumerate(notes):
+        r = 4 + offset
+        ws.cell(row=r, column=1, value=tag).font = Font(
+            name=BRAND_FONT, bold=True, size=8, color=J_PRIMARY)
+        ws.cell(row=r, column=2, value=desc).font = Font(
+            name=BRAND_FONT, size=8, color=J_CHARCOAL)
+        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=11)
+
+    headers = ["Date", "Run #", "Point", "Type", "Measured", "Unit",
+               "Nominal", "Low", "High", "Dev %", "Result"]
+    HR = 9
+    for col, h in enumerate(headers, 1):
+        _primary_cell(ws, HR, col, h, size=9, bold=True)
+    ws.row_dimensions[HR].height = 18
+
+    VERDICT_COLORS = {
+        "PASS":     (PASS_BG,       PASS_FG),
+        "FAIL":     (FAIL_BG,       FAIL_FG),
+        "BASELINE": (INCOMPLETE_BG, INCOMPLETE_FG),
+        "SKIPPED":  (J_OFFWHITE,    J_CHARCOAL),
+    }
+
+    r = HR
+    if not runs:
+        r += 1
+        _navy_cell(ws, r, 1,
+                   "No verification runs recorded yet. Run one from the PVD Verify "
+                   "page before the next production batch.",
+                   size=9, bold=False, span_end_col=11)
+    for run in runs:
+        r += 1
+        overall = (run.get("overall") or "").upper()
+        summary = (
+            f"Run #{run.get('id')}  ·  {(run.get('started_at') or '')[:16].replace('T', ' ')}  ·  "
+            f"{run.get('profile_name') or run.get('profile_id')}  ·  mode: {run.get('mode')}  ·  "
+            f"operator: {run.get('operator') or '—'}  ·  "
+            f"instrument: {run.get('device_model') or '—'} S/N {run.get('device_serial') or '—'}  ·  "
+            f"PVD S/N: {run.get('pvd_serial') or '—'}  ·  RESULT: {overall or '—'}"
+        )
+        _navy_cell(ws, r, 1, summary, size=9, bold=True, span_end_col=11)
+
+        for i, pt in enumerate(run.get("points", [])):
+            r += 1
+            verdict = (pt.get("verdict") or "").upper()
+            bg, fg = VERDICT_COLORS.get(verdict, (J_OFFWHITE, J_CHARCOAL))
+            alt_bg = "FFF8F9FA" if i % 2 else "FFFFFFFF"
+
+            def _cell(col, val, align="left", num_format=None):
+                c = ws.cell(row=r, column=col, value=val)
+                c.font      = Font(name=BRAND_FONT, size=9, color=J_CHARCOAL)
+                c.fill      = PatternFill("solid", fgColor=alt_bg)
+                c.alignment = Alignment(horizontal=align, vertical="center")
+                c.border    = _border()
+                if num_format:
+                    c.number_format = num_format
+                return c
+
+            unit = pt.get("unit") or ""
+            # Leakage currents are microamp-scale; a fixed format would show 0.00.
+            num_fmt = "0.000E+00" if unit == "A" else "0.0000"
+
+            _cell(1,  (pt.get("created_at") or "")[:10])
+            _cell(2,  run.get("id"), align="center")
+            _cell(3,  pt.get("point_name") or pt.get("point_id"))
+            _cell(4,  pt.get("step_type"), align="center")
+            _cell(5,  pt.get("measured"),  align="center", num_format=num_fmt)
+            _cell(6,  "Ω" if unit == "ohm" else unit, align="center")
+            _cell(7,  pt.get("nominal"),   align="center", num_format=num_fmt)
+            _cell(8,  pt.get("limit_low"), align="center", num_format=num_fmt)
+            _cell(9,  pt.get("limit_high"),align="center", num_format=num_fmt)
+            _cell(10, pt.get("deviation_pct"), align="center", num_format="+0.00;-0.00")
+
+            vc = ws.cell(row=r, column=11, value=verdict or "—")
+            vc.font      = Font(name=BRAND_FONT, size=9, bold=True, color=fg)
+            vc.fill      = PatternFill("solid", fgColor=bg)
+            vc.alignment = Alignment(horizontal="center", vertical="center")
+            vc.border    = _border()
+
+            reason = pt.get("reason")
+            if reason:
+                vc.comment = None
+                rc = ws.cell(row=r, column=12, value=reason)
+                rc.font      = Font(name=BRAND_FONT, size=8, italic=True, color=J_CHARCOAL)
+                rc.alignment = Alignment(horizontal="left", vertical="center")
+
+    widths = [12, 8, 34, 8, 14, 7, 14, 14, 14, 10, 11, 46]
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+
 def export_to_excel(output_path: str,
                     session_ids: Optional[list[int]] = None,
                     db_path: str = DB_PATH) -> str:
     """
-    Export sessions and PEC-0063 thermal results to a Juniper-branded Excel file.
+    Export sessions, PEC-0063 thermal results and PVD instrument verification
+    history to a Juniper-branded Excel file.
     If session_ids is None, exports all sessions (most recent first, up to 500).
     Returns the path to the written file.
     """
@@ -475,6 +604,17 @@ def export_to_excel(output_path: str,
     # PEC-0063 thermal qualification sheet
     thermal_rows = get_thermal_tests(limit=500, db_path=db_path)
     _write_pec0063_sheet(wb, thermal_rows)
+
+    # Instrument performance verification (PVD) sheet. Wrapped because an older
+    # database may predate the PVD tables, and a missing verification history
+    # must not cost the user their test-results export.
+    try:
+        ensure_pvd_tables(db_path)
+        pvd_runs = [get_pvd_run(r["id"], db_path=db_path)
+                    for r in get_pvd_runs(limit=200, db_path=db_path)]
+        _write_pvd_sheet(wb, [r for r in pvd_runs if r])
+    except Exception as exc:
+        print(f"[excel_export] PVD sheet skipped: {exc}")
 
     wb.save(output_path)
     return output_path

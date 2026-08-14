@@ -1,0 +1,200 @@
+{
+  "_meta": {
+    "purpose": "Performance Verification Device (PVD) profiles for the Vitrek V7X series.",
+    "why_not_the_built_in_routine": "The V7X front panel has UTILITY MENU -> AUTO PVD, but the remote command set documented in Section 6 of the V7X Series Operating Manual has NO command to trigger it. RUN only executes the active programmed sequence. So this software reproduces the verification as a normal programmed sequence, which has the advantage of capturing the actual measured value for every point instead of just a front-panel PASS/FAIL.",
+    "how_pass_fail_works": "Each point declares a nominal expected reading and a tolerance window. The step limits sent to the V7X are deliberately WIDE so the instrument does not trip out mid-step; the verdict is computed in software from the STEPRSLT? measurement against the window. Any instrument status flag (breakdown, arc, interlock, abort...) is an automatic FAIL regardless of the measured value.",
+    "baseline_required": "Vitrek does not publish the internal load values of the APVD devices. Every point below therefore ships with nominal = null, which means the software will record the measurement but REFUSE to issue a PASS/FAIL. Run the profile in 'baseline' mode against a V71 that is within its calibration period, review the captured values, then promote them to nominals via POST /api/pvd/baseline/promote (or by editing this file).",
+    "tolerance_note": "default_tol_pct must cover the V7X measurement accuracy PLUS the APVD load tolerance PLUS normal line/temperature variation. 10 % is a deliberately loose starting point for a go/no-go daily check. Tighten it only after you have several baseline runs to look at.",
+    "safety_note": "Test voltages below are conservative defaults. Confirm the APVD-74 voltage ratings with Vitrek before raising any voltage field.",
+    "manual_reference": "V7X Series Operating Manual - August 8, 2025, Sections 4, 6 and 7."
+  },
+
+  "capabilities_by_model": {
+    "V70": ["ACW", "CONT"],
+    "V71": ["ACW", "DCW", "CONT"],
+    "V73": ["ACW", "DCW", "IR", "CONT"],
+    "V74": ["ACW", "DCW", "IR", "CONT", "GB"],
+    "V75": ["ACW", "DCW", "IR", "CONT"],
+    "V76": ["ACW", "DCW", "IR", "CONT"],
+    "V77": ["ACW", "DCW", "IR", "CONT", "GB"],
+    "V79": ["CONT", "GB"]
+  },
+
+  "profiles": {
+    "apvd-74": {
+      "name": "APVD-74 Performance Verification",
+      "device": "APVD-74",
+      "description": "Daily performance verification of the hipot tester using the Vitrek APVD-74 Performance Verification Device. The APVD-74 carries hipot, low-resistance and ground-bond loads; the ground-bond and insulation-resistance points below are skipped automatically on a V71, which has neither mode.",
+      "default_tol_pct": 10.0,
+      "recommended_interval_hours": 24,
+
+      "phases": [
+        {
+          "id": 1,
+          "name": "Hipot load",
+          "instructions": [
+            "Connect White Plug to HV Terminal",
+            "Connect Red & Black Plugs to CONT Terminals",
+            "Leave Red & Black Ring Lugs Disconnected",
+            "Ensure Disconnected Leads are Not Touching Anything"
+          ],
+          "danger": "This phase applies high voltage. Confirm the safety enclosure is closed and nobody is in contact with the DUT area before continuing."
+        },
+        {
+          "id": 2,
+          "name": "Low resistance load",
+          "instructions": [
+            "Leave White Plug connected to HV Terminal",
+            "Connect the Red & Black Ring Lugs together across the APVD low-resistance load",
+            "Ensure no other leads are touching anything"
+          ],
+          "danger": "No high voltage is applied in this phase, but do not change any connection while a step is running."
+        },
+        {
+          "id": 3,
+          "name": "Ground bond load",
+          "instructions": [
+            "Connect the K-2R ground bond leads to the APVD-74 GB terminals",
+            "Ensure the hipot leads are disconnected"
+          ],
+          "danger": "High current. Keep hands clear of the GB leads.",
+          "requires": ["GB"]
+        }
+      ],
+
+      "points": [
+        {
+          "id": "acw_1000",
+          "name": "ACW 1000 Vrms into hipot load",
+          "phase": 1,
+          "type": "ACW",
+          "requires": ["ACW"],
+          "params": { "voltage": 1000.0, "ramp": 1.0, "dwell": 3.0, "max_leakage": 0.005 },
+          "measure": "measurement",
+          "unit": "A",
+          "label": "Leakage current",
+          "nominal": null,
+          "tol_pct": null,
+          "tol_abs": null,
+          "note": "max_leakage is the WIDE instrument trip limit, not the pass criterion. The pass criterion is the nominal/tolerance window evaluated in software."
+        },
+        {
+          "id": "dcw_1000",
+          "name": "DCW 1000 V into hipot load",
+          "phase": 1,
+          "type": "DCW",
+          "requires": ["DCW"],
+          "params": { "voltage": 1000.0, "ramp": 1.0, "dwell": 3.0, "max_leakage": 0.005 },
+          "measure": "measurement",
+          "unit": "A",
+          "label": "Leakage current",
+          "nominal": null,
+          "tol_pct": null,
+          "tol_abs": null,
+          "note": "Wide trip limit; verdict computed in software."
+        },
+        {
+          "id": "ir_500",
+          "name": "IR 500 V into hipot load",
+          "phase": 1,
+          "type": "IR",
+          "requires": ["IR"],
+          "params": { "voltage": 500.0, "dwell": 5.0, "min_resistance": 1000.0, "precheck_delay": 0.0 },
+          "measure": "measurement",
+          "unit": "ohm",
+          "label": "Insulation resistance",
+          "nominal": null,
+          "tol_pct": null,
+          "tol_abs": null,
+          "note": "Skipped on a V71 - that model has no IR mode. Present so this profile also works on a V73/V74."
+        },
+        {
+          "id": "cont_low_r",
+          "name": "CONT into low-resistance load",
+          "phase": 2,
+          "type": "CONT",
+          "requires": ["CONT"],
+          "params": { "dwell": 3.0, "min_ohm": null, "max_ohm": null },
+          "measure": "measurement",
+          "unit": "ohm",
+          "label": "Resistance",
+          "nominal": null,
+          "tol_pct": null,
+          "tol_abs": null,
+          "note": "Run CONT ZERO on the V7X with the leads shorted before baselining, so lead resistance is offset out. See APPENDIX A of the operating manual."
+        },
+        {
+          "id": "gb_25a",
+          "name": "GB 25 A into ground bond load",
+          "phase": 3,
+          "type": "GB",
+          "requires": ["GB"],
+          "params": { "current": 25.0, "dwell": 3.0, "max_ohm": 0.5 },
+          "measure": "measurement",
+          "unit": "ohm",
+          "label": "Ground bond resistance",
+          "nominal": null,
+          "tol_pct": null,
+          "tol_abs": null,
+          "note": "Skipped on a V71 - that model has no GB mode. Present so this profile also works on a V74/V77/V79."
+        }
+      ]
+    },
+
+    "apvd-7x": {
+      "name": "APVD-7X Performance Verification",
+      "device": "APVD-7X",
+      "description": "Hipot and low-resistance verification only. Same points as the APVD-74 profile minus the ground bond phase.",
+      "default_tol_pct": 10.0,
+      "recommended_interval_hours": 24,
+      "phases": [
+        {
+          "id": 1,
+          "name": "Hipot load",
+          "instructions": [
+            "Connect White Plug to HV Terminal",
+            "Connect Red & Black Plugs to CONT Terminals",
+            "Leave Red & Black Ring Lugs Disconnected",
+            "Ensure Disconnected Leads are Not Touching Anything"
+          ],
+          "danger": "This phase applies high voltage. Confirm the safety enclosure is closed before continuing."
+        },
+        {
+          "id": 2,
+          "name": "Low resistance load",
+          "instructions": [
+            "Leave White Plug connected to HV Terminal",
+            "Connect the Red & Black Ring Lugs together across the APVD low-resistance load"
+          ],
+          "danger": "No high voltage in this phase. Do not change connections while a step is running."
+        }
+      ],
+      "points": [
+        {
+          "id": "acw_1000",
+          "name": "ACW 1000 Vrms into hipot load",
+          "phase": 1, "type": "ACW", "requires": ["ACW"],
+          "params": { "voltage": 1000.0, "ramp": 1.0, "dwell": 3.0, "max_leakage": 0.005 },
+          "measure": "measurement", "unit": "A", "label": "Leakage current",
+          "nominal": null, "tol_pct": null, "tol_abs": null
+        },
+        {
+          "id": "dcw_1000",
+          "name": "DCW 1000 V into hipot load",
+          "phase": 1, "type": "DCW", "requires": ["DCW"],
+          "params": { "voltage": 1000.0, "ramp": 1.0, "dwell": 3.0, "max_leakage": 0.005 },
+          "measure": "measurement", "unit": "A", "label": "Leakage current",
+          "nominal": null, "tol_pct": null, "tol_abs": null
+        },
+        {
+          "id": "cont_low_r",
+          "name": "CONT into low-resistance load",
+          "phase": 2, "type": "CONT", "requires": ["CONT"],
+          "params": { "dwell": 3.0, "min_ohm": null, "max_ohm": null },
+          "measure": "measurement", "unit": "ohm", "label": "Resistance",
+          "nominal": null, "tol_pct": null, "tol_abs": null
+        }
+      ]
+    }
+  }
+}
