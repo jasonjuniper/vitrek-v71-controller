@@ -80,7 +80,6 @@ from test_battery import TestBattery, _load_batteries
 import pvd_test
 import auth
 from auth import admin_required
-import import_panel_sequences  # provides seed_default_sequences() for first-run seeding
 
 # Drivers — loaded lazily so the app starts even without hardware
 try:
@@ -1542,10 +1541,19 @@ def api_export_session(session_id):
 # PAGE ROUTES  (serve the Juniper-branded single-page UIs)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@app.route("/")
+@app.route("/station")
 def page_landing():
+    """
+    Station home — instrument picker and engineering entry point.
+
+    This used to be "/". It moved because a bench terminal opening on a menu
+    of instruments is one wrong click away from a setup screen, and because
+    the operator should not have to navigate to reach the only thing they
+    need. "/" now serves the run screen; this page is where you go on purpose.
+    """
     return render_template_string(_LANDING_HTML)
 
+@app.route("/")
 @app.route("/run")
 def page_run():
     """
@@ -1688,7 +1696,7 @@ button:disabled{opacity:.45;cursor:default;}
 <body>
 <header class="juniper-brand-bar">
   <div class="juniper-brand-bar-inner">
-    <a href="/"><img class="juniper-logo" src="/static/assets/juniper-logo.svg" alt="Juniper"></a>
+    <a href="/station"><img class="juniper-logo" src="/static/assets/juniper-logo.svg" alt="Juniper"></a>
     <div style="display:flex;align-items:center;gap:14px;">
       <span class="juniper-product">Automated Test Station</span>
       <span class="status-pill" id="global-status">No instrument</span>
@@ -1699,7 +1707,7 @@ button:disabled{opacity:.45;cursor:default;}
   </div>
 </header>
 <nav class="inst-nav">
-  <a href="/"       class="inst-tab %(tab_home)s"   >⌂ Station</a>
+  <a href="/station" class="inst-tab %(tab_home)s"   >⌂ Station</a>
   <a href="/hipot"  class="inst-tab %(tab_hipot)s"  >⚡ HiPot (V71)</a>
   <a href="/pvd"    class="inst-tab %(tab_pvd)s"    >✓ PVD Verify</a>
   <a href="/dcload" class="inst-tab %(tab_dcload)s" >🔋 DC Load (SDL1020X)</a>
@@ -3227,7 +3235,7 @@ main{flex:1 1 auto; display:flex; flex-direction:column; padding:22px 32px; gap:
   <div class="who">Operator <b id="who">—</b>
     <button class="linkish" onclick="changeOperator()">change</button></div>
   <span class="pill" id="conn">Connecting…</span>
-  <button class="linkish" onclick="location.href='/hipot'">Full view</button>
+  <button class="linkish" onclick="location.href='/station'">Full view</button>
 </header>
 
 <main>
@@ -3441,14 +3449,5 @@ window.addEventListener('keydown', e=>{
 # ═══════════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     db.init_db()
-    # First-run seed: make sure the three panel-transcribed sequences exist so a
-    # freshly-imaged station isn't left with an empty sequence dropdown. Idempotent
-    # and one-time-guarded; never blocks startup if it fails.
-    try:
-        _seed = import_panel_sequences.seed_default_sequences()
-        if _seed.get("created"):
-            print(f"Seeded default sequences: {', '.join(_seed['created'])}")
-    except Exception as _seed_err:
-        print(f"Default-sequence seeding skipped: {_seed_err}")
     print("Juniper Test Station starting at http://localhost:5000")
     app.run(host="0.0.0.0", port=5000, debug=False)
