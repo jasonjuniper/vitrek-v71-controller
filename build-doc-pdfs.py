@@ -65,6 +65,9 @@ DOCS = [
     (os.path.join(DOCS_DIR,   'sourcing-list.md'),              'sourcing-list.pdf'),
     (os.path.join(DOCS_DIR,   'pvd-verification.md'),           'pvd-verification.pdf'),
     (os.path.join(DOCS_DIR,   'access-control.md'),             'access-control.pdf'),
+    (os.path.join(DOCS_DIR,   'v71-sequence-settings.md'),      'v71-sequence-settings.pdf'),
+    (os.path.join(DOCS_DIR,   'v71-operator-sheet.md'),         'v71-operator-sheet.pdf'),
+    (os.path.join(DOCS_DIR,   'test-sequence-review-questions.md'), 'test-sequence-review-questions.pdf'),
 ]
 
 PAGE_SIZE_CSS = 'Letter'
