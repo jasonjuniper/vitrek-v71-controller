@@ -35,12 +35,18 @@ do not guess.
 ## Running a test
 
 1. Fit the unit in the fixture and connect the test leads.
-2. On the **HiPot** page of the station software, choose the sequence.
-3. Fill in **Operator**, **Part Number** and **DUT Serial**.
+2. Press the button for the test you need.
+3. Scan or type the **Order Number**.
 4. Stand clear of the fixture.
-5. Press **▶ Run Sequence**.
-6. Wait for the result. Do not touch anything until the screen says the run has
-   finished.
+5. Press **GO**.
+6. Wait for the result. Do not touch anything until **PASS** or **FAIL** fills
+   the screen.
+
+If GO is greyed out, the grey text underneath says why — usually no test chosen,
+no order number, or the tester is not connected.
+
+Your name is set once at the start of a shift, not for every unit. If the name
+in the top right is not yours, press **change**.
 
 The full test takes about **8 seconds**: 5 seconds of continuity, then about
 2 seconds at high voltage.
@@ -52,7 +58,8 @@ The full test takes about **8 seconds**: 5 seconds of continuity, then about
 **PASS** — every step stayed inside its limits. The unit is good.
 
 **FAIL** — set the unit aside, tagged, and tell your supervisor. The screen shows
-which step failed and why. The most common messages:
+which step failed and why. Press **OK** to clear it and test the next unit. The
+most common messages:
 
 | Message | Meaning in plain terms |
 |---------|------------------------|

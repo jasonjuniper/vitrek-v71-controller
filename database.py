@@ -17,12 +17,7 @@ import json
 import os
 from typing import Optional
 
-from paths import data_dir
-
-# Results DB lives in the writable, persistent data dir (ProgramData when frozen;
-# the source tree in dev). NOT next to __file__ — under a PyInstaller onefile exe
-# that resolves to the temp _MEIPASS dir and the DB would be wiped on exit.
-DB_PATH = os.path.join(data_dir(), "hipot_results.db")
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hipot_results.db")
 
 DDL = """
 CREATE TABLE IF NOT EXISTS test_sessions (
@@ -31,6 +26,11 @@ CREATE TABLE IF NOT EXISTS test_sessions (
     finished_at     TEXT,
     operator        TEXT,
     part_number     TEXT,
+    -- Shown in the UI and in reports as "Order Number". The column keeps
+    -- its original name deliberately: packaged builds already in the field
+    -- write to this database, and renaming it would break any older exe
+    -- still running against the same ProgramData file. Label changed,
+    -- storage unchanged.
     serial_number   TEXT,
     notes           TEXT,
     overall_result  INTEGER,          -- RSLT? bitmask (0 = pass)
@@ -212,9 +212,42 @@ def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
 
 
 def init_db(db_path: str = DB_PATH) -> None:
-    """Create tables if they don't exist."""
+    """Create tables if they don't exist, then apply additive migrations."""
     with get_connection(db_path) as conn:
         conn.executescript(DDL)
+    ensure_result_detail_columns(db_path)
+
+
+def _add_column_if_missing(conn, table: str, column: str, decl: str) -> bool:
+    """
+    Add a column only if it is absent. Returns True if it was added.
+
+    Additive by design. Renaming or dropping a column would break any packaged
+    build already in the field that writes to the same database file; adding one
+    is invisible to an older exe, which simply leaves it NULL.
+    """
+    cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    if column in cols:
+        return False
+    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+    return True
+
+
+def ensure_result_detail_columns(db_path: str = DB_PATH) -> None:
+    """
+    Record what each test was configured to do, not only what it measured.
+
+    Without these, an exported result shows "1500 V, 2.3 uA, PASS" with no way
+    to tell whether it passed against a 5 mA limit or against no limit at all —
+    which for a dielectric step set to "Breakdown Only" is a real difference.
+    The instrument's global config is captured too, because ARC and FREQ change
+    the pass/fail outcome and are not part of any sequence.
+    """
+    with get_connection(db_path) as conn:
+        _add_column_if_missing(conn, "test_steps",    "config_json",        "TEXT")
+        _add_column_if_missing(conn, "test_sessions", "sequence_name",      "TEXT")
+        _add_column_if_missing(conn, "test_sessions", "sequence_revision",  "INTEGER")
+        _add_column_if_missing(conn, "test_sessions", "instrument_config",  "TEXT")
 
 
 def ensure_sensor_log_table(db_path: str = DB_PATH) -> None:
@@ -302,16 +335,27 @@ def get_sensor_log(session_id: int = None, limit: int = 3600,
 
 def create_session(operator: str = "", part_number: str = "", serial_number: str = "",
                    notes: str = "", device_model: str = "", device_serial: str = "",
-                   firmware: str = "", db_path: str = DB_PATH) -> int:
-    """Insert a new test session row and return its id."""
+                   firmware: str = "", sequence_name: str = "",
+                   sequence_revision: int = None, instrument_config: dict = None,
+                   db_path: str = DB_PATH) -> int:
+    """
+    Insert a new test session row and return its id.
+
+    serial_number is presented to users as "Order Number"; the column keeps its
+    original name so older packaged builds sharing this database still work.
+    """
+    ensure_result_detail_columns(db_path)
     with get_connection(db_path) as conn:
         cur = conn.execute(
             """INSERT INTO test_sessions
                (started_at, operator, part_number, serial_number, notes,
-                device_model, device_serial, firmware)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                device_model, device_serial, firmware,
+                sequence_name, sequence_revision, instrument_config)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (datetime.datetime.now().isoformat(), operator, part_number,
-             serial_number, notes, device_model, device_serial, firmware)
+             serial_number, notes, device_model, device_serial, firmware,
+             sequence_name or None, sequence_revision,
+             json.dumps(instrument_config) if instrument_config else None)
         )
         return cur.lastrowid
 
@@ -330,14 +374,22 @@ def finish_session(session_id: int, overall_result: int,
 
 
 def save_step_result(session_id: int, step_number: int, step_type: str,
-                     result: dict, db_path: str = DB_PATH) -> int:
-    """Insert a step result row. result is the dict from V71Driver.step_result()."""
+                     result: dict, config: dict = None,
+                     db_path: str = DB_PATH) -> int:
+    """
+    Insert a step result row.
+
+    result is the dict from V71Driver.step_result(); config is the step as it
+    was programmed, so the record shows the limits the measurement was judged
+    against rather than only the measurement.
+    """
     with get_connection(db_path) as conn:
         cur = conn.execute(
             """INSERT INTO test_steps
                (session_id, step_number, step_type, phase, elapsed_s,
-                status_flags, passed, level, breakdown_a, measurement, arc_a, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                status_flags, passed, level, breakdown_a, measurement, arc_a,
+                created_at, config_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session_id,
                 step_number,
@@ -351,6 +403,7 @@ def save_step_result(session_id: int, step_number: int, step_type: str,
                 result.get("measurement"),
                 result.get("arc_a"),
                 datetime.datetime.now().isoformat(),
+                json.dumps(config) if config else None,
             )
         )
         return cur.lastrowid

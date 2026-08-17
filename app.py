@@ -144,6 +144,7 @@ _dcload:  "SDL1020XDriver | None"  = None
 # HiPot session tracking
 _hipot_session_id: int | None = None
 _hipot_step_types: list[str]  = []
+_hipot_step_configs: list[dict] = []   # steps as programmed, for the record
 _hipot_run_thread: threading.Thread | None = None
 
 # PEC-0063 thermal qualification test
@@ -237,7 +238,8 @@ def _recorder_loop():
 
 
 # ── Background run monitor for HiPot ─────────────────────────────────────────
-def _hipot_monitor(session_id: int, step_types: list[str]):
+def _hipot_monitor(session_id: int, step_types: list[str],
+                   step_configs: list[dict] = None):
     global _hipot_session_id
     try:
         time.sleep(0.5)
@@ -250,7 +252,9 @@ def _hipot_monitor(session_id: int, step_types: list[str]):
         for i, ch in enumerate(_hipot.step_status_string(), start=1):
             step_type = step_types[i - 1] if i <= len(step_types) else "UNKNOWN"
             result = _hipot.step_result(i)
-            db.save_step_result(session_id, i, step_type, result)
+            cfg = (step_configs[i - 1]
+                   if step_configs and i <= len(step_configs) else None)
+            db.save_step_result(session_id, i, step_type, result, config=cfg)
     except Exception as e:
         app.logger.error(f"HiPot monitor error: {e}")
     finally:
@@ -528,6 +532,7 @@ def api_hipot_run():
 def _run_hipot_steps(d: dict):
     """Shared body for both the ad-hoc and saved-sequence run routes."""
     global _hipot_session_id, _hipot_step_types, _hipot_run_thread
+    global _hipot_step_configs
     if not _hipot or not _hipot.connected:
         return jsonify({"ok": False, "error": "HiPot not connected"}), 400
     d = d or {}
@@ -536,6 +541,16 @@ def _run_hipot_steps(d: dict):
         return jsonify({"ok": False, "error": "No steps provided"}), 400
     try:
         idn = _hipot.identify()
+
+        # Snapshot the global configuration BEFORE the run. ARC, FREQ, IREND and
+        # CONTFAIL decide pass/fail but live outside the sequence, so a result
+        # recorded without them cannot be fully reproduced or audited later.
+        # Queries are not reliable while a sequence is running, hence "before".
+        try:
+            instrument_config = _hipot.backup_config()
+        except Exception as exc:                           # noqa: BLE001
+            instrument_config = {"error": f"could not read configuration: {exc}"}
+
         _hipot.new_sequence()
         step_types = []
         for step in steps:
@@ -547,12 +562,16 @@ def _run_hipot_steps(d: dict):
             serial_number=d.get("serial_number", ""), notes=d.get("notes", ""),
             device_model=idn.get("model", ""), device_serial=idn.get("serial", ""),
             firmware=idn.get("firmware", ""),
+            sequence_name=d.get("sequence_name", ""),
+            sequence_revision=d.get("sequence_revision"),
+            instrument_config=instrument_config,
         )
         _hipot_session_id = session_id
         _hipot_step_types = step_types
+        _hipot_step_configs = list(steps)
         _hipot.run()
         _hipot_run_thread = threading.Thread(
-            target=_hipot_monitor, args=(session_id, step_types), daemon=True
+            target=_hipot_monitor, args=(session_id, step_types, list(steps)), daemon=True
         )
         _hipot_run_thread.start()
         return jsonify({"ok": True, "session_id": session_id})
@@ -1354,11 +1373,13 @@ def api_hipot_run_sequence():
     note = d.get("notes", "")
     stamp = f"Sequence: {seq['name']} (rev {seq.get('revision')})"
     request_payload = {
-        "operator":      d.get("operator", ""),
-        "part_number":   d.get("part_number", ""),
-        "serial_number": d.get("serial_number", ""),
-        "notes":         f"{stamp} · {note}" if note else stamp,
-        "steps":         seq["steps"],
+        "operator":          d.get("operator", ""),
+        "part_number":       d.get("part_number", ""),
+        "serial_number":     d.get("serial_number", ""),
+        "notes":             f"{stamp} · {note}" if note else stamp,
+        "steps":             seq["steps"],
+        "sequence_name":     seq["name"],
+        "sequence_revision": seq.get("revision"),
     }
     return _run_hipot_steps(request_payload)
 
@@ -1946,7 +1967,7 @@ _HIPOT_HTML = _render_head("HiPot — V71", tab_hipot="active") + r"""
         <h2>Test Parameters</h2>
         <label>Operator</label><input id="operator" placeholder="Name">
         <label>Part Number</label><input id="part-number">
-        <label>DUT Serial</label><input id="dut-serial">
+        <label>Order Number</label><input id="dut-serial">
         <label>Notes</label><input id="notes">
       </div>
 
@@ -3242,10 +3263,10 @@ main{flex:1 1 auto; display:flex; flex-direction:column; padding:22px 32px; gap:
   <div class="label">1 — CHOOSE TEST</div>
   <div id="tiles"></div>
 
-  <div class="label">2 — SCAN OR TYPE SERIAL, THEN PRESS GO</div>
+  <div class="label">2 — SCAN OR TYPE ORDER NUMBER, THEN PRESS GO</div>
   <div class="bar">
     <div class="field">
-      <input id="serial" placeholder="DUT serial" autocomplete="off" spellcheck="false">
+      <input id="serial" placeholder="Order number" autocomplete="off" spellcheck="false">
     </div>
     <button id="go" disabled onclick="onGo()">GO</button>
   </div>
@@ -3344,7 +3365,7 @@ function updateGo(){
   const why = !connected ? 'Tester is not connected.'
             : !operator() ? 'Set the operator name first.'
             : sel===null  ? 'Choose a test above.'
-            : !$('serial').value.trim() ? 'Scan or type the DUT serial.'
+            : !$('serial').value.trim() ? 'Scan or type the order number.'
             : '';
   g.disabled = !!why;
   $('hint').textContent = why;
@@ -3426,6 +3447,8 @@ function clearResult(){
 
 /* Wiring ----------------------------------------------------------------- */
 $('serial').addEventListener('input', updateGo);
+// The field is labelled Order Number in the UI but travels as serial_number
+// through the API and database — see the note on that column in database.py.
 // A barcode scanner ends its scan with Enter. That fills the field and moves
 // focus to GO, but deliberately does NOT start the test — starting 1500 V is
 // always an explicit press.

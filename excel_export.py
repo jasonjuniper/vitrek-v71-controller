@@ -17,6 +17,7 @@ Brand palette mirrors juniper-brand.css light-theme tokens:
 """
 
 import os
+import json
 import datetime
 from typing import Optional
 
@@ -141,6 +142,98 @@ def decode_flags(flags: int) -> str:
 
 # ── Branded title banner (rows 1–2) ───────────────────────────────────────────
 
+# ── Configured-parameter formatting ───────────────────────────────────────────
+
+def _fmt_amps(v) -> str:
+    """Render a current in the units an operator would recognise."""
+    try: v = float(v)
+    except (TypeError, ValueError): return str(v)
+    a = abs(v)
+    if a >= 1:     return f"{v:g} A"
+    if a >= 1e-3:  return f"{v*1e3:g} mA"
+    if a >= 1e-6:  return f"{v*1e6:g} µA"
+    return f"{v:g} A"
+
+
+def _fmt_ohms(v) -> str:
+    try: v = float(v)
+    except (TypeError, ValueError): return str(v)
+    a = abs(v)
+    if a >= 1e9: return f"{v/1e9:g} GΩ"
+    if a >= 1e6: return f"{v/1e6:g} MΩ"
+    if a >= 1e3: return f"{v/1e3:g} kΩ"
+    return f"{v:g} Ω"
+
+
+def describe_step_config(cfg: dict) -> tuple:
+    """
+    Return (setpoint, limits, options) as display strings for a programmed step.
+
+    "Breakdown Only" is stated explicitly rather than shown as a blank, because
+    a blank limit cell reads as missing data when it is in fact a deliberate
+    setting — the V7X still detects breakdown, it just applies no numeric
+    window to leakage.
+    """
+    if not cfg:
+        return ("—", "—", "—")
+    t = (cfg.get("type") or "").upper()
+
+    def g(k):
+        v = cfg.get(k)
+        return None if v in (None, "") else v
+
+    setpoint, limits, opts = "—", "—", []
+
+    if t in ("ACW", "DCW"):
+        setpoint = f"{g('voltage')} V{'rms' if t == 'ACW' else ''}"
+        ramp, dwell = g("ramp"), g("dwell")
+        setpoint += f"  ·  ramp {ramp}s" if ramp else ""
+        setpoint += f"  ·  dwell {dwell}s" if dwell else ""
+        lo, hi = g("min_leakage"), g("max_leakage")
+        if lo is None and hi is None:
+            limits = "Breakdown Only (no leakage limits)"
+        else:
+            limits = " / ".join(filter(None, [
+                f"min {_fmt_amps(lo)}" if lo is not None else None,
+                f"max {_fmt_amps(hi)}" if hi is not None else None]))
+        opts.append("Grounded DUT" if str(g("grounded") or "0") not in ("0", "")
+                    else "Isolated DUT")
+        if t == "DCW":
+            opts.append("Capacitive" if str(g("capacitive") or "0") not in ("0", "")
+                        else "Resistive")
+    elif t == "IR":
+        setpoint = f"{g('voltage')} V"
+        if g("dwell"):           setpoint += f"  ·  dwell {g('dwell')}s"
+        if g("precheck_delay"):  setpoint += f"  ·  delay {g('precheck_delay')}s"
+        lo, hi = g("min_resistance"), g("max_resistance")
+        limits = " / ".join(filter(None, [
+            f"min {_fmt_ohms(lo)}" if lo is not None else None,
+            f"max {_fmt_ohms(hi)}" if hi is not None else "max none"]))
+        opts.append("Grounded DUT" if str(g("grounded") or "0") not in ("0", "")
+                    else "Isolated DUT")
+        if str(g("capacitive") or "0") not in ("0", ""): opts.append("Capacitive")
+    elif t == "GB":
+        setpoint = f"{g('current')} A"
+        if g("dwell"): setpoint += f"  ·  dwell {g('dwell')}s"
+        lo, hi = g("min_ohm"), g("max_ohm")
+        limits = " / ".join(filter(None, [
+            f"min {_fmt_ohms(lo)}" if lo is not None else None,
+            f"max {_fmt_ohms(hi)}" if hi is not None else None])) or "none"
+    elif t == "CONT":
+        setpoint = f"dwell {g('dwell')}s" if g("dwell") else "—"
+        lo, hi = g("min_ohm"), g("max_ohm")
+        limits = " / ".join(filter(None, [
+            f"min {_fmt_ohms(lo)}" if lo is not None else None,
+            f"max {_fmt_ohms(hi)}" if hi is not None else None])) or "none"
+    elif t == "PAUSE":
+        setpoint = f"{g('pause')}s wait"
+    elif t == "HOLD":
+        setpoint = f"timeout {g('timeout')}s"
+        opts = [x for x in (g("msg1"), g("msg2")) if x]
+
+    return (setpoint, limits, "  ·  ".join(opts) if opts else "—")
+
+
 def _write_title_banner(ws, num_cols: int, subtitle: str) -> int:
     """
     Write a two-row Juniper brand header spanning all columns.
@@ -183,8 +276,10 @@ def _write_session_sheet(wb: openpyxl.Workbook, session: dict, steps: list[dict]
     ws = wb.create_sheet(title=title)
     ws.sheet_view.showGridLines = False
 
-    # Column widths
-    col_widths = [22, 32, 14, 14, 16, 16, 14, 34]
+    # Column widths. Columns 1-2 do double duty: meta labels/values above the
+    # steps table, then Step # / Type within it, so they stay wide enough for
+    # the labels rather than being sized to the narrow step columns.
+    col_widths = [20, 28, 34, 30, 24, 22, 12, 14, 14, 12, 30]
     for i, w in enumerate(col_widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -194,7 +289,7 @@ def _write_session_sheet(wb: openpyxl.Workbook, session: dict, steps: list[dict]
     next_row = _write_title_banner(
         ws, NUM_COLS,
         subtitle=f"Test Report  ·  Session #{session['id']}  ·  "
-                 f"DUT: {session.get('serial_number') or '—'}  ·  "
+                 f"Order: {session.get('serial_number') or '—'}  ·  "
                  f"Part: {session.get('part_number') or '—'}"
     )
 
@@ -205,7 +300,9 @@ def _write_session_sheet(wb: openpyxl.Workbook, session: dict, steps: list[dict]
         ("Finished",      session.get("finished_at") or "—"),
         ("Operator",      session.get("operator") or "—"),
         ("Part Number",   session.get("part_number") or "—"),
-        ("DUT Serial",    session.get("serial_number") or "—"),
+        ("Order Number",  session.get("serial_number") or "—"),
+        ("Test Sequence", (f"{session.get('sequence_name')} (rev {session.get('sequence_revision')})"
+                           if session.get("sequence_name") else "—")),
         ("Device Model",  session.get("device_model") or "—"),
         ("Device Serial", session.get("device_serial") or "—"),
         ("Firmware",      session.get("firmware") or "—"),
@@ -245,7 +342,8 @@ def _write_session_sheet(wb: openpyxl.Workbook, session: dict, steps: list[dict]
     next_row += 2   # spacer before steps table
 
     # ── Steps table ─────────────────────────────────────────────────────────
-    step_headers = ["Step #", "Type", "Phase", "Elapsed (s)",
+    step_headers = ["Step #", "Type", "Set point (programmed)", "Limits (programmed)",
+                    "DUT / options", "Phase", "Elapsed (s)",
                     "Level (V/A)", "Leakage / R", "Arc (A)", "Status / Flags"]
     for col, h in enumerate(step_headers, 1):
         _primary_cell(ws, next_row, col, h, wrap=True)
@@ -258,16 +356,71 @@ def _write_session_sheet(wb: openpyxl.Workbook, session: dict, steps: list[dict]
         bg    = PASS_BG if p == 1 else (FAIL_BG if p == 0 else None)
         fg    = PASS_FG if p == 1 else (FAIL_FG if p == 0 else J_CHARCOAL)
 
+        try:
+            cfg = json.loads(step.get("config_json") or "null")
+        except (ValueError, TypeError):
+            cfg = None
+        setpoint, limits, opts = describe_step_config(cfg)
+
         _data_cell(ws, next_row, 1, step.get("step_number"),   bg=bg, bold=True, fg=fg)
         _data_cell(ws, next_row, 2, step.get("step_type", ""), bg=bg, bold=True, fg=fg)
-        _data_cell(ws, next_row, 3, step.get("phase", ""),     bg=bg, fg=fg)
-        _data_cell(ws, next_row, 4, step.get("elapsed_s"),     bg=bg, fg=fg, number_format="0.000")
-        _data_cell(ws, next_row, 5, step.get("level"),         bg=bg, fg=fg, number_format="0.000E+00")
-        _data_cell(ws, next_row, 6, step.get("measurement"),   bg=bg, fg=fg, number_format="0.000E+00")
-        _data_cell(ws, next_row, 7, step.get("arc_a"),         bg=bg, fg=fg, number_format="0.000E+00")
-        _data_cell(ws, next_row, 8, decode_flags(sf),          bg=bg, fg=fg, bold=(sf != 0))
+        _data_cell(ws, next_row, 3, setpoint,                  bg=bg, fg=fg)
+        _data_cell(ws, next_row, 4, limits,                    bg=bg, fg=fg)
+        _data_cell(ws, next_row, 5, opts,                      bg=bg, fg=fg)
+        _data_cell(ws, next_row, 6, step.get("phase", ""),     bg=bg, fg=fg)
+        _data_cell(ws, next_row, 7, step.get("elapsed_s"),     bg=bg, fg=fg, number_format="0.000")
+        _data_cell(ws, next_row, 8, step.get("level"),         bg=bg, fg=fg, number_format="0.000E+00")
+        _data_cell(ws, next_row, 9, step.get("measurement"),   bg=bg, fg=fg, number_format="0.000E+00")
+        _data_cell(ws, next_row,10, step.get("arc_a"),         bg=bg, fg=fg, number_format="0.000E+00")
+        _data_cell(ws, next_row,11, decode_flags(sf),          bg=bg, fg=fg, bold=(sf != 0))
         ws.row_dimensions[next_row].height = 15
         next_row += 1
+
+    # ── Instrument configuration at time of test ────────────────────────────
+    #
+    # Recorded because these settings decide pass/fail but are stored on the
+    # instrument rather than in the sequence. ARC in particular: with it
+    # disabled, a unit that arced would pass a sequence identical in every
+    # other respect. Without this block the result is not reproducible.
+    cfg_raw = session.get("instrument_config")
+    if cfg_raw:
+        try:
+            icfg = json.loads(cfg_raw)
+        except (ValueError, TypeError):
+            icfg = None
+        if icfg:
+            next_row += 1
+            _navy_cell(ws, next_row, 1, "INSTRUMENT CONFIGURATION AT TIME OF TEST",
+                       size=10, span_end_col=NUM_COLS)
+            ws.row_dimensions[next_row].height = 20
+            next_row += 1
+
+            settings = icfg.get("settings") or {}
+            descs    = icfg.get("descriptions") or {}
+            if settings:
+                for col, h in enumerate(["Setting", "Value", "Meaning"], 1):
+                    _primary_cell(ws, next_row, col, h, wrap=True)
+                next_row += 1
+                for key in sorted(settings):
+                    _data_cell(ws, next_row, 1, key, bold=True)
+                    _data_cell(ws, next_row, 2, settings[key])
+                    _data_cell(ws, next_row, 3, descs.get(key, ""))
+                    ws.row_dimensions[next_row].height = 15
+                    next_row += 1
+            else:
+                _data_cell(ws, next_row, 1,
+                           icfg.get("error") or "Configuration could not be read.")
+                next_row += 1
+
+            # State the gaps rather than letting the block imply completeness.
+            not_covered = icfg.get("not_covered") or []
+            if not_covered:
+                next_row += 1
+                _meta_label(ws, next_row, 1, "Not captured")
+                _meta_value(ws, next_row, 2,
+                            "  ·  ".join(x.split(" — ")[0] for x in not_covered))
+                ws.row_dimensions[next_row].height = 16
+                next_row += 1
 
     # ── Juniper footer rule ─────────────────────────────────────────────────
     next_row += 1
@@ -304,7 +457,7 @@ def _write_summary_sheet(wb: openpyxl.Workbook, sessions: list[dict]) -> None:
     )
 
     # Column headers
-    hdrs = ["Session #", "Started", "Finished", "Part Number", "DUT Serial", "Result", "Steps"]
+    hdrs = ["Session #", "Started", "Finished", "Part Number", "Order Number", "Result", "Steps"]
     for col, h in enumerate(hdrs, 1):
         _primary_cell(ws, next_row, col, h)
     ws.row_dimensions[next_row].height = 20
