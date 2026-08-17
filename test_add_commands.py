@@ -44,6 +44,15 @@ CASES = [
     ("ACW with min limit in field 5",
      lambda d: d.add_acw_step(1500.0, 2.0, 30.0, 0.005, min_leakage_a=0.0001),
      "ADD,ACW,1500.0,2.0,30.0,0.0001,0.005"),
+    ("ACW 'Breakdown Only' — both limits NONE",
+     lambda d: d.add_acw_step(1500.0, 1.0, 1.0, max_leakage_a=None),
+     "ADD,ACW,1500.0,1.0,1.0,,"),
+    ("DCW 'Breakdown Only' — both limits NONE",
+     lambda d: d.add_dcw_step(1000.0, 1.5, 60.0, max_leakage_a=None),
+     "ADD,DCW,1000.0,1.5,60.0,,"),
+    ("CONT max limit only (Sequence 1 as built on the panel)",
+     lambda d: d.add_cont_step(5.0, max_ohm=5000.0),
+     "ADD,CONT,5.0,,5000.0"),
 
     # --- DCW: ... | 7 GND | 8 CAP (both positional) ---
     ("DCW manual example (isolated, resistive)",

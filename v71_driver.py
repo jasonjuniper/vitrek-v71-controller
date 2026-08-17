@@ -334,10 +334,18 @@ class V71Driver:
     def add_acw_step(self, voltage_v: float, ramp_s: float, dwell_s: float,
                      max_leakage_a: float = 0.005, min_leakage_a: float = None,
                      grounded: bool = False) -> None:
-        """Add an AC Withstand (ACW) test step."""
+        """
+        Add an AC Withstand (ACW) test step.
+
+        Pass max_leakage_a=None for the front panel's "Breakdown Only" setting.
+        Per the manual, with both limits set to NONE the V7X still detects
+        breakdown in accordance with most standards — it simply does not apply
+        a numeric pass/fail window to the leakage reading.
+        """
         min_field = f"{min_leakage_a}" if min_leakage_a is not None else ""
+        max_field = f"{max_leakage_a}" if max_leakage_a is not None else ""
         gnd_field = ",GND" if grounded else ""
-        cmd = f"ADD,ACW,{voltage_v},{ramp_s},{dwell_s},{min_field},{max_leakage_a}{gnd_field}"
+        cmd = f"ADD,ACW,{voltage_v},{ramp_s},{dwell_s},{min_field},{max_field}{gnd_field}"
         self.add_step(cmd)
 
     def add_dcw_step(self, voltage_v: float, ramp_s: float, dwell_s: float,
@@ -356,7 +364,8 @@ class V71Driver:
         empty field 7 to hold its place.
         """
         min_field = f"{min_leakage_a}" if min_leakage_a is not None else ""
-        cmd = f"ADD,DCW,{voltage_v},{ramp_s},{dwell_s},{min_field},{max_leakage_a}"
+        max_field = f"{max_leakage_a}" if max_leakage_a is not None else ""
+        cmd = f"ADD,DCW,{voltage_v},{ramp_s},{dwell_s},{min_field},{max_field}"
         if grounded or capacitive:
             cmd += f",{'GND' if grounded else ''},{'CAP' if capacitive else ''}"
         self.add_step(cmd)

@@ -584,15 +584,18 @@ def _opt_float(step, key):
 
 def _add_hipot_step(drv, st, step):
     if st == "ACW":
+        # A blank max_leakage is the panel's "Breakdown Only" — it must stay
+        # None rather than falling back to a default, or the step silently
+        # gains a leakage limit the operator never set.
         drv.add_acw_step(float(step["voltage"]), float(step.get("ramp", 1.5)),
                          float(step.get("dwell", 60)),
-                         float(step.get("max_leakage", 0.005)),
+                         _opt_float(step, "max_leakage"),
                          _opt_float(step, "min_leakage"),
                          _truthy(step.get("grounded")))
     elif st == "DCW":
         drv.add_dcw_step(float(step["voltage"]), float(step.get("ramp", 1.5)),
                          float(step.get("dwell", 60)),
-                         float(step.get("max_leakage", 25e-6)),
+                         _opt_float(step, "max_leakage"),
                          _opt_float(step, "min_leakage"),
                          _truthy(step.get("grounded")),
                          _truthy(step.get("capacitive")))
