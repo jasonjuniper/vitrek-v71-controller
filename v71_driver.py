@@ -343,23 +343,44 @@ class V71Driver:
     def add_dcw_step(self, voltage_v: float, ramp_s: float, dwell_s: float,
                      max_leakage_a: float = 25e-6, min_leakage_a: float = None,
                      grounded: bool = False, capacitive: bool = False) -> None:
-        """Add a DC Withstand (DCW) test step."""
+        """
+        Add a DC Withstand (DCW) test step.
+
+        Manual field order (DCW CONFIGURATION FIELDS):
+            1 DCW | 2 voltage | 3 ramp | 4 dwell | 5 min leakage | 6 max leakage
+            7 '' = isolated DUT, 'GND' = grounded DUT
+            8 '' = resistive DUT, 'CAP' = capacitive DUT
+
+        Fields 7 and 8 are positional. Field 8 may only be omitted if field 7
+        is omitted too, so setting CAP on an isolated DUT still requires an
+        empty field 7 to hold its place.
+        """
         min_field = f"{min_leakage_a}" if min_leakage_a is not None else ""
-        gnd_field = "GND" if grounded else ""
-        cap_field = ",CAP" if capacitive else ""
-        gnd_sep = "," if grounded or capacitive else ""
-        cmd = f"ADD,DCW,{voltage_v},{ramp_s},{dwell_s},{min_field},{max_leakage_a},{gnd_sep}{gnd_field}{cap_field}"
+        cmd = f"ADD,DCW,{voltage_v},{ramp_s},{dwell_s},{min_field},{max_leakage_a}"
+        if grounded or capacitive:
+            cmd += f",{'GND' if grounded else ''},{'CAP' if capacitive else ''}"
         self.add_step(cmd)
 
     def add_ir_step(self, voltage_v: float, dwell_s: float,
                     min_resistance_ohm: float = 100e6,
                     max_resistance_ohm: float = None,
                     precheck_delay_s: float = 0.0,
-                    grounded: bool = False) -> None:
-        """Add an Insulation Resistance (IR) test step."""
+                    grounded: bool = False,
+                    capacitive: bool = False) -> None:
+        """
+        Add an Insulation Resistance (IR) test step.
+
+        Manual field order (IR CONFIGURATION FIELDS):
+            1 IR | 2 voltage | 3 dwell | 4 pre-check delay
+            5 min resistance | 6 max resistance
+            7 '' = isolated DUT, 'GND' = grounded DUT
+            8 '' = resistive DUT, 'CAP' = capacitive DUT
+        """
         max_field = f"{max_resistance_ohm}" if max_resistance_ohm is not None else ""
-        gnd_field = ",GND" if grounded else ""
-        cmd = f"ADD,IR,{voltage_v},{dwell_s},{precheck_delay_s},{min_resistance_ohm},{max_field}{gnd_field}"
+        cmd = (f"ADD,IR,{voltage_v},{dwell_s},{precheck_delay_s},"
+               f"{min_resistance_ohm},{max_field}")
+        if grounded or capacitive:
+            cmd += f",{'GND' if grounded else ''},{'CAP' if capacitive else ''}"
         self.add_step(cmd)
 
     def add_gb_step(self, current_a: float, dwell_s: float,
@@ -402,6 +423,118 @@ class V71Driver:
         self.add_step(
             f"ADD,HOLD,{timeout_s},{sanitize_message(line1)},{sanitize_message(line2)}"
         )
+
+    # --- Instrument configuration backup / restore ---
+    #
+    # The V7X exposes a query form for each of its global configuration
+    # settings, so the configuration CAN be snapshotted and replayed.
+    #
+    # Two deliberate gaps, both documented in CONFIG_BACKUP_GAPS below:
+    #   * IFACE (RS232 vs USB) has no remote command at all — by design, since
+    #     changing it remotely could sever the connection issuing the command.
+    #   * The CONT ZERO and GB ZERO lead-resistance offsets (UTILITY MENU) have
+    #     no remote command either, and neither does the per-step ZERO offset
+    #     in the sequence editor. These must be re-measured by hand.
+    #
+    # There is NO way to read a test sequence back out of the instrument. The
+    # sequence commands (NOSEQ / ADD / NAME / RCL / SAVE) are write-only and
+    # the protocol has no query returning step definitions. A config backup is
+    # therefore a backup of settings, never of sequences.
+
+    CONFIG_QUERIES = {
+        "VICL":      ("VICL?",      int,   "Number of 964 switch matrix units (0-4)"),
+        "DIO":       ("DIO?",       int,   "Digital I/O input enable (0=none, 1=interlock, 2=start/stop, 3=all)"),
+        "START":     ("START?",     int,   "Front panel START behaviour (0=stop first, 1=no stop, 2=disabled)"),
+        "BEEP":      ("BEEP?",      int,   "Beeper (0=off, 1=start/stop, 2=keys, 3=all)"),
+        "FREQ":      ("FREQ?",      int,   "ACW/GB test frequency in Hz (50 or 60)"),
+        "ARC":       ("ARC?",       int,   "Arc current limit (0=disabled)"),
+        "IREND":     ("IREND?",     int,   "IR end-on (0=fail, 1=pass, 2=time only, 3=pass and steady/increasing)"),
+        "RAMPDOWN":  ("RAMPDOWN?",  int,   "Ramp down (0=fast, 1=as ramp)"),
+        "CONTFAIL":  ("CONTFAIL?",  int,   "Continue sequence on failure (0=no, 1=yes)"),
+    }
+
+    CONFIG_BACKUP_GAPS = [
+        "IFACE (RS232 vs USB) — no remote command; set from the CONFIG MENU screen.",
+        "CONT ZERO lead-resistance offset — no remote command; re-measure from UTILITY MENU -> CONT ZERO.",
+        "GB ZERO lead-resistance offset — no remote command; re-measure from UTILITY MENU -> GB ZERO.",
+        "Per-step ZERO offsets inside CONT/GB sequence steps — not settable over the interface at all.",
+        "Test sequences — the protocol is write-only for sequences; they cannot be read back.",
+        "CONFIG MENU lock password — no remote command.",
+    ]
+
+    def backup_config(self) -> dict:
+        """
+        Snapshot every remotely-readable configuration setting.
+
+        Returns a dict with the instrument identity, the settings, and an
+        explicit list of what this backup does NOT cover, so a restore is
+        never mistaken for a complete recovery.
+        """
+        settings = {}
+        errors = {}
+        for key, (cmd, caster, _desc) in self.CONFIG_QUERIES.items():
+            try:
+                raw = self.query(cmd).strip()
+                settings[key] = caster(raw)
+            except Exception as exc:                       # noqa: BLE001
+                # A model without a setting (e.g. VICL on a V75) answers with
+                # an error rather than a value. Record it instead of aborting
+                # the whole backup.
+                errors[key] = str(exc)
+        return {
+            "instrument":   self.identify(),
+            "settings":     settings,
+            "unreadable":   errors,
+            "descriptions": {k: v[2] for k, v in self.CONFIG_QUERIES.items()},
+            "not_covered":  list(self.CONFIG_BACKUP_GAPS),
+        }
+
+    def restore_config(self, backup: dict, dry_run: bool = False) -> dict:
+        """
+        Replay a snapshot from backup_config() back into the instrument.
+
+        Returns a per-setting report. With dry_run=True the commands are built
+        and returned but never sent, so the operator can review exactly what
+        would change before anything is written.
+        """
+        settings = (backup or {}).get("settings") or {}
+        if not settings:
+            raise V71Error("Backup contains no settings to restore.")
+
+        current = {}
+        if not dry_run:
+            # Read first so the report can show what actually changed.
+            for key in settings:
+                if key in self.CONFIG_QUERIES:
+                    try:
+                        current[key] = self.CONFIG_QUERIES[key][1](
+                            self.query(self.CONFIG_QUERIES[key][0]).strip())
+                    except Exception:                      # noqa: BLE001
+                        current[key] = None
+
+        report = {"applied": [], "skipped": [], "failed": [], "dry_run": dry_run}
+        for key, value in settings.items():
+            if key not in self.CONFIG_QUERIES:
+                report["skipped"].append({key: "not a known configuration setting"})
+                continue
+            cmd = f"{key},{value}"
+            if dry_run:
+                report["applied"].append({"setting": key, "command": cmd})
+                continue
+            try:
+                self.send_command(cmd)
+                err = self.check_error()
+                if err:
+                    report["failed"].append({"setting": key, "command": cmd,
+                                             "error_code": err})
+                else:
+                    report["applied"].append({"setting": key, "command": cmd,
+                                              "was": current.get(key), "now": value})
+            except Exception as exc:                       # noqa: BLE001
+                report["failed"].append({"setting": key, "command": cmd,
+                                         "error": str(exc)})
+        report["not_covered"] = list(self.CONFIG_BACKUP_GAPS)
+        return report
 
     def name_sequence(self, name: str) -> None:
         """Set the name of the active test sequence."""

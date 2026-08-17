@@ -70,7 +70,7 @@ import time
 import datetime
 import tempfile
 
-from flask import (Flask, jsonify, request, send_file,
+from flask import (Flask, jsonify, request, send_file, make_response,
                    render_template_string, redirect, url_for)
 
 import database as db
@@ -560,34 +560,148 @@ def _run_hipot_steps(d: dict):
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+def _truthy(value) -> bool:
+    """
+    Interpret a step flag that may arrive as a bool, a number, or a string.
+
+    The sequence builder posts every field as a string, and bool("0") is True
+    in Python — so the naive bool() call this replaces turned an explicitly
+    "isolated" DUT into a grounded one.
+    """
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on", "gnd",
+                                         "cap", "grounded", "capacitive")
+    return bool(value)
+
+
+def _opt_float(step, key):
+    """Return float(step[key]) or None when the field is absent or blank."""
+    raw = step.get(key)
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    return float(raw)
+
+
 def _add_hipot_step(drv, st, step):
     if st == "ACW":
         drv.add_acw_step(float(step["voltage"]), float(step.get("ramp", 1.5)),
                          float(step.get("dwell", 60)),
                          float(step.get("max_leakage", 0.005)),
-                         float(step["min_leakage"]) if step.get("min_leakage") else None,
-                         bool(step.get("grounded", False)))
+                         _opt_float(step, "min_leakage"),
+                         _truthy(step.get("grounded")))
     elif st == "DCW":
         drv.add_dcw_step(float(step["voltage"]), float(step.get("ramp", 1.5)),
                          float(step.get("dwell", 60)),
                          float(step.get("max_leakage", 25e-6)),
-                         float(step["min_leakage"]) if step.get("min_leakage") else None,
-                         bool(step.get("grounded", False)), bool(step.get("capacitive", False)))
+                         _opt_float(step, "min_leakage"),
+                         _truthy(step.get("grounded")),
+                         _truthy(step.get("capacitive")))
     elif st == "IR":
         drv.add_ir_step(float(step["voltage"]), float(step.get("dwell", 60)),
                         float(step.get("min_resistance", 100e6)),
-                        float(step["max_resistance"]) if step.get("max_resistance") else None,
-                        float(step.get("precheck_delay", 0)), bool(step.get("grounded", False)))
+                        _opt_float(step, "max_resistance"),
+                        float(step.get("precheck_delay", 0)),
+                        _truthy(step.get("grounded")),
+                        _truthy(step.get("capacitive")))
     elif st == "GB":
         drv.add_gb_step(float(step["current"]), float(step.get("dwell", 5)),
                         float(step.get("max_ohm", 0.1)),
-                        float(step["min_ohm"]) if step.get("min_ohm") else None)
+                        _opt_float(step, "min_ohm"))
     elif st == "CONT":
         drv.add_cont_step(float(step.get("dwell", 5)),
-                          float(step["min_ohm"]) if step.get("min_ohm") else None,
-                          float(step["max_ohm"]) if step.get("max_ohm") else None)
+                          _opt_float(step, "min_ohm"),
+                          _opt_float(step, "max_ohm"))
+    elif st == "PAUSE":
+        drv.add_pause_step(float(step.get("pause", 5)))
+    elif st == "HOLD":
+        drv.add_hold_step(float(step.get("timeout", 60)),
+                          step.get("msg1", ""), step.get("msg2", ""))
     else:
         raise ValueError(f"Unknown step type: {st}")
+
+
+@app.route("/api/hipot/config/backup")
+def api_hipot_config_backup():
+    """
+    Snapshot the V71's global configuration settings.
+
+    This is a settings backup, not a sequence backup. The V7X protocol has no
+    query that returns sequence step definitions, so sequences cannot be read
+    out of the instrument by any means — see 'not_covered' in the response.
+    """
+    if not _hipot or not _hipot.connected:
+        return jsonify({"ok": False, "error": "Not connected"}), 400
+    if _hipot.is_running():
+        return jsonify({"ok": False,
+                        "error": "A sequence is running — abort it first."}), 409
+    try:
+        backup = _hipot.backup_config()
+    except Exception as e:                                 # noqa: BLE001
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    backup["captured_utc"] = datetime.datetime.now(
+        datetime.timezone.utc).isoformat(timespec="seconds")
+    backup["captured_by"] = "admin" if auth.is_admin() else "operator"
+    backup["schema"] = "v7x-config-backup/1"
+
+    if request.args.get("download"):
+        idn = backup.get("instrument") or {}
+        stamp = backup["captured_utc"].replace(":", "").replace("-", "")
+        fname = f"v7x-config-{idn.get('serial', 'unknown')}-{stamp}.json"
+        resp = make_response(json.dumps(backup, indent=2))
+        resp.headers["Content-Type"] = "application/json"
+        resp.headers["Content-Disposition"] = f'attachment; filename="{fname}"'
+        return resp
+    return jsonify({"ok": True, "backup": backup})
+
+
+@app.route("/api/hipot/config/restore", methods=["POST"])
+@admin_required
+def api_hipot_config_restore():
+    """
+    Replay a saved configuration snapshot into the instrument.
+
+    Defaults to a dry run: pass {"confirm": true} to actually write. Nothing is
+    written while a sequence is running.
+    """
+    if not _hipot or not _hipot.connected:
+        return jsonify({"ok": False, "error": "Not connected"}), 400
+    if _hipot.is_running():
+        return jsonify({"ok": False,
+                        "error": "A sequence is running — abort it first."}), 409
+
+    d = request.get_json(force=True) or {}
+    backup = d.get("backup")
+    if not isinstance(backup, dict):
+        return jsonify({"ok": False, "error": "No backup supplied."}), 400
+
+    if backup.get("schema") not in (None, "v7x-config-backup/1"):
+        return jsonify({"ok": False,
+                        "error": f"Unrecognised backup schema {backup.get('schema')!r}."}), 400
+
+    # Restoring a backup taken from a different model can push a setting the
+    # connected unit does not have. Warn rather than block — the per-setting
+    # report shows exactly what was rejected.
+    warnings = []
+    try:
+        live = _hipot.identify()
+        saved = backup.get("instrument") or {}
+        if saved.get("model") and live.get("model") != saved.get("model"):
+            warnings.append(
+                f"Backup was taken from a {saved.get('model')}, "
+                f"this instrument is a {live.get('model')}.")
+        if saved.get("serial") and live.get("serial") != saved.get("serial"):
+            warnings.append(
+                f"Backup was taken from serial {saved.get('serial')}, "
+                f"this instrument is serial {live.get('serial')}.")
+    except Exception:                                      # noqa: BLE001
+        pass
+
+    try:
+        report = _hipot.restore_config(backup, dry_run=not d.get("confirm"))
+    except Exception as e:                                 # noqa: BLE001
+        return jsonify({"ok": False, "error": str(e)}), 500
+    return jsonify({"ok": True, "report": report, "warnings": warnings})
 
 
 @app.route("/api/hipot/abort", methods=["POST"])
@@ -1523,6 +1637,7 @@ button:disabled{opacity:.45;cursor:default;}
 .step-item{background:var(--bg-elev-2);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;position:relative;}
 .step-item h4{font-size:.8rem;color:var(--primary);margin-bottom:6px;font-weight:600;}
 .step-item .del-step{position:absolute;top:6px;right:8px;background:none;border:none;color:var(--error-fg);font-size:1rem;cursor:pointer;padding:0;}
+.step-note{font-size:.68rem;color:var(--text-muted);margin-top:6px;line-height:1.4;}
 /* Results table */
 .results-table{width:100%;border-collapse:collapse;font-size:.8rem;}
 .results-table th{background:var(--table-head-bg);color:var(--text-soft);padding:6px 8px;text-align:left;font-weight:600;font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;border-bottom:2px solid var(--border);}
@@ -1839,6 +1954,8 @@ _HIPOT_HTML = _render_head("HiPot — V71", tab_hipot="active") + r"""
           <option value="IR">IR — Insulation Resistance</option>
           <option value="GB">GB — Ground Bond</option>
           <option value="CONT">CONT — Continuity</option>
+          <option value="PAUSE">PAUSE — timed wait</option>
+          <option value="HOLD">HOLD — wait for operator</option>
         </select>
         <button class="btn-muted" onclick="addStep()">+ Add Step</button>
         <div id="steps-list" style="margin-top:8px;"></div>
@@ -1851,6 +1968,34 @@ _HIPOT_HTML = _render_head("HiPot — V71", tab_hipot="active") + r"""
         <div style="font-size:.7rem;color:var(--text-muted);margin-top:6px;">
           Retiring hides a sequence from operators but keeps the definition, so
           results recorded against it stay traceable.
+        </div>
+        <div style="font-size:.7rem;color:var(--text-muted);margin-top:8px;border-top:1px solid var(--border);padding-top:8px;">
+          <strong>Transcribing from the tester?</strong> The V7X protocol is
+          write-only for sequences — there is no command that reads a stored
+          sequence back out, so a panel-built sequence has to be copied by hand.
+          The field labels above match the EDIT SEQUENCE button names. One thing
+          that cannot be copied: the per-step <em>ZERO</em> resistance offset on
+          CONT and GB steps has no remote equivalent, so if the panel sequence
+          uses one, the readings here will differ by that offset.
+        </div>
+      </div>
+
+      <div class="card admin-only">
+        <h2>Instrument Config <span style="float:right;font-size:.7rem;color:var(--text-muted);font-weight:400;">admin</span></h2>
+        <div class="btn-row">
+          <button class="btn-muted" onclick="doConfigBackup()">⬇ Back Up Settings</button>
+          <button class="btn-muted" onclick="document.getElementById('cfg-file').click()">⬆ Restore…</button>
+          <input type="file" id="cfg-file" accept=".json,application/json" style="display:none" onchange="doConfigRestore(event)">
+        </div>
+        <div id="cfg-msg"></div>
+        <div id="cfg-report" style="font-size:.74rem;margin-top:6px;"></div>
+        <div style="font-size:.7rem;color:var(--text-muted);margin-top:6px;">
+          Covers the nine CONFIG MENU settings the instrument will report
+          (VICL, DIO, START, BEEP, FREQ, ARC, IREND, RAMPDOWN, CONTFAIL).
+          It does <strong>not</strong> cover the IFACE setting, the CONT/GB
+          ZERO lead offsets, the lock password, or any test sequence — none of
+          those can be read over the interface. Restore previews the changes
+          first and only writes after you confirm.
         </div>
       </div>
     </div>
@@ -1887,33 +2032,132 @@ function addStep(type,values){
   const div=document.createElement('div');div.className='step-item';div.id=`step-${uid}`;div.dataset.type=type;
   div.innerHTML=`<button class="del-step" onclick="removeStep(${uid})">✕</button><h4></h4>${fieldHtml(type,uid)}`;
   list.appendChild(div);
-  if(values)div.querySelectorAll('input').forEach(i=>{
+  if(values)div.querySelectorAll('input,select').forEach(i=>{
     const k=i.name.replace(/^steps\[\d+\]\./,'');
-    if(values[k]!==undefined&&values[k]!==null)i.value=values[k];
+    if(values[k]===undefined||values[k]===null)return;
+    // Saved sequences may hold booleans, '1'/'0', or the legacy 'GND'/'CAP'
+    // spellings. Normalise before assigning so the select actually matches.
+    if(i.tagName==='SELECT'){
+      const s=String(values[k]).toLowerCase();
+      i.value=(s==='1'||s==='true'||s==='yes'||s==='on'||s==='gnd'||s==='cap')?'1':'0';
+    } else i.value=values[k];
   });
   renumber();
 }
 function removeStep(uid){document.getElementById(`step-${uid}`)?.remove();renumber();}
 function renumber(){document.querySelectorAll('#steps-list .step-item').forEach((el,i)=>el.querySelector('h4').textContent=`Step ${i+1}: ${el.dataset.type}`);}
+// Field labels below deliberately mirror the button names on the V7X EDIT
+// SEQUENCE screen (TYPE / LEVEL / DUT / RAMP / DWELL / DELAY / LIMITS) so a
+// sequence built on the front panel can be transcribed button-for-button.
+// Blank a limit to mean NONE, exactly as the panel does.
 function fieldHtml(t,uid){
   const v=`steps[${uid}]`;
-  if(t==='ACW')return`<div class="grid-2"><div><label>Voltage (Vrms)</label><input name="${v}.voltage" value="1000"></div><div><label>Ramp (s)</label><input name="${v}.ramp" value="1.5"></div><div><label>Dwell (s)</label><input name="${v}.dwell" value="60"></div><div><label>Max Leakage (A)</label><input name="${v}.max_leakage" value="0.005"></div></div>`;
-  if(t==='DCW')return`<div class="grid-2"><div><label>Voltage (V)</label><input name="${v}.voltage" value="1000"></div><div><label>Ramp (s)</label><input name="${v}.ramp" value="1.5"></div><div><label>Dwell (s)</label><input name="${v}.dwell" value="60"></div><div><label>Max Leakage (A)</label><input name="${v}.max_leakage" value="0.000025"></div></div>`;
-  if(t==='IR') return`<div class="grid-2"><div><label>Voltage (V)</label><input name="${v}.voltage" value="500"></div><div><label>Dwell (s)</label><input name="${v}.dwell" value="60"></div><div><label>Min Resistance (Ω)</label><input name="${v}.min_resistance" value="100000000"></div><div><label>Precheck delay (s)</label><input name="${v}.precheck_delay" value="0"></div></div>`;
-  if(t==='GB') return`<div class="grid-2"><div><label>Current (A)</label><input name="${v}.current" value="25"></div><div><label>Dwell (s)</label><input name="${v}.dwell" value="5"></div><div><label>Max Ω</label><input name="${v}.max_ohm" value="0.1"></div></div>`;
-  if(t==='CONT')return`<div class="grid-2"><div><label>Test time (s)</label><input name="${v}.dwell" value="5"></div><div><label>Min Ω</label><input name="${v}.min_ohm" value="1.0"></div><div><label>Max Ω</label><input name="${v}.max_ohm" value="2.0"></div></div>`;
+  const dutGnd=`<div><label>DUT (earth)</label><select name="${v}.grounded"><option value="0">Isolated</option><option value="1">Grounded</option></select></div>`;
+  const dutCap=`<div><label>DUT (load)</label><select name="${v}.capacitive"><option value="0">Resistive</option><option value="1">Capacitive</option></select></div>`;
+  const note=s=>`<div class="step-note">${s}</div>`;
+  if(t==='ACW')return`<div class="grid-2">
+    <div><label>LEVEL — Voltage (Vrms)</label><input name="${v}.voltage" value="1000"></div>
+    <div><label>RAMP (s)</label><input name="${v}.ramp" value="1.5"></div>
+    <div><label>DWELL (s)</label><input name="${v}.dwell" value="60"></div>
+    ${dutGnd}
+    <div><label>LIMITS — Min Leakage (A)</label><input name="${v}.min_leakage" placeholder="blank = NONE"></div>
+    <div><label>LIMITS — Max Leakage (A)</label><input name="${v}.max_leakage" value="0.005" placeholder="blank = NONE"></div>
+  </div>${note('Enter limits in amps — 5 mA is 0.005. The panel lets you pick µA/mA units; convert to plain amps here.')}`;
+  if(t==='DCW')return`<div class="grid-2">
+    <div><label>LEVEL — Voltage (V)</label><input name="${v}.voltage" value="1000"></div>
+    <div><label>RAMP (s)</label><input name="${v}.ramp" value="1.5"></div>
+    <div><label>DWELL (s)</label><input name="${v}.dwell" value="60"></div>
+    ${dutGnd}${dutCap}
+    <div><label>LIMITS — Min Leakage (A)</label><input name="${v}.min_leakage" placeholder="blank = NONE"></div>
+    <div><label>LIMITS — Max Leakage (A)</label><input name="${v}.max_leakage" value="0.000025" placeholder="blank = NONE"></div>
+  </div>${note('Enter limits in amps — 25 µA is 0.000025.')}`;
+  if(t==='IR') return`<div class="grid-2">
+    <div><label>LEVEL — Voltage (V)</label><input name="${v}.voltage" value="500"></div>
+    <div><label>DWELL (s)</label><input name="${v}.dwell" value="60"></div>
+    <div><label>DELAY — pre-check (s)</label><input name="${v}.precheck_delay" value="0"></div>
+    ${dutGnd}${dutCap}
+    <div><label>LIMITS — Min Resistance (Ω)</label><input name="${v}.min_resistance" value="100000000"></div>
+    <div><label>LIMITS — Max Resistance (Ω)</label><input name="${v}.max_resistance" placeholder="blank = NONE"></div>
+  </div>${note('IR steps have no RAMP. DELAY is the wait inside the dwell before limits are enforced.')}`;
+  if(t==='GB') return`<div class="grid-2">
+    <div><label>LEVEL — Current (A)</label><input name="${v}.current" value="25"></div>
+    <div><label>DWELL (s)</label><input name="${v}.dwell" value="5"></div>
+    <div><label>LIMITS — Min Ω</label><input name="${v}.min_ohm" placeholder="blank = NONE"></div>
+    <div><label>LIMITS — Max Ω</label><input name="${v}.max_ohm" value="0.1"></div>
+  </div>${note('On a GB step LEVEL is amps, not volts — this is the "A" setting on the panel. Per-step ZERO offsets cannot be set over the interface; see the note under Save.')}`;
+  if(t==='CONT')return`<div class="grid-2">
+    <div><label>DWELL — Test time (s)</label><input name="${v}.dwell" value="5"></div>
+    <div><label>LIMITS — Min Ω</label><input name="${v}.min_ohm" placeholder="blank = NONE"></div>
+    <div><label>LIMITS — Max Ω</label><input name="${v}.max_ohm" placeholder="blank = NONE"></div>
+  </div>${note('Per-step ZERO offsets cannot be set over the interface; see the note under Save.')}`;
+  if(t==='PAUSE')return`<div class="grid-2">
+    <div><label>DELAY — Pause time (s)</label><input name="${v}.pause" value="5"></div>
+  </div>${note('Unattended wait — the sequence continues on its own.')}`;
+  if(t==='HOLD')return`<div class="grid-2">
+    <div><label>Timeout (s)</label><input name="${v}.timeout" value="60"></div>
+    <div><label>MSG 1</label><input name="${v}.msg1" maxlength="16" placeholder="16 chars"></div>
+    <div><label>MSG 2</label><input name="${v}.msg2" maxlength="16" placeholder="16 chars"></div>
+  </div>${note('Waits for the operator. Messages are upper-cased and stripped to the panel character set.')}`;
   return'';
 }
 function collectSteps(){
   const out=[];
   document.querySelectorAll('#steps-list .step-item').forEach(item=>{
     const obj={type:item.dataset.type};
-    item.querySelectorAll('input').forEach(i=>{const k=i.name.replace(/^steps\[\d+\]\./,'');if(k&&i.value!=='')obj[k]=i.value;});
+    item.querySelectorAll('input,select').forEach(i=>{
+      const k=i.name.replace(/^steps\[\d+\]\./,'');
+      // Keep '0' — it is a meaningful value for the DUT selects. Only drop
+      // genuinely blank fields, which the V7X reads as "no limit".
+      if(k&&i.value!=='')obj[k]=i.value;
+    });
     out.push(obj);
   });
   return out;
 }
 function clearBuilder(){document.getElementById('steps-list').innerHTML='';_stepUid=0;}
+
+// ── Instrument config backup / restore (admin) ───────────────────────────────
+function doConfigBackup(){
+  // Straight to a download so the file lands somewhere the operator controls,
+  // rather than being held in the browser.
+  window.location='/api/hipot/config/backup?download=1';
+  showMsg('cfg-msg','Settings snapshot downloaded.','ok');
+}
+async function doConfigRestore(ev){
+  const file=ev.target.files&&ev.target.files[0];
+  ev.target.value='';
+  if(!file)return;
+  let backup;
+  try{backup=JSON.parse(await file.text());}
+  catch(e){showMsg('cfg-msg','That file is not valid JSON.','err');return;}
+
+  const post=confirm=>fetch('/api/hipot/config/restore',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({backup,confirm})}).then(r=>r.json());
+
+  const dry=await post(false);
+  if(!dry.ok){showMsg('cfg-msg',dry.error||'Restore failed','err');return;}
+  const rows=(dry.report.applied||[]);
+  if(!rows.length){showMsg('cfg-msg','Nothing in that file to restore.','err');return;}
+
+  const warn=(dry.warnings||[]).length?'\n\n'+dry.warnings.join('\n')+'\n':'\n';
+  const list=rows.map(r=>`  ${r.setting} → ${backup.settings[r.setting]}`).join('\n');
+  if(!window.confirm(`Write these ${rows.length} settings to the instrument?\n${warn}\n${list}`+
+      `\n\nNot covered by this restore:\n  `+(dry.report.not_covered||[]).join('\n  '))){
+    showMsg('cfg-msg','Restore cancelled — nothing was written.','ok');return;
+  }
+  const live=await post(true);
+  if(!live.ok){showMsg('cfg-msg',live.error||'Restore failed','err');return;}
+  const rep=live.report;
+  showMsg('cfg-msg',`Restored ${rep.applied.length} setting(s)`+
+    (rep.failed.length?`, ${rep.failed.length} rejected.`:'.'),
+    rep.failed.length?'err':'ok');
+  document.getElementById('cfg-report').innerHTML=
+    '<table class="results-table"><thead><tr><th>Setting</th><th>Was</th><th>Now</th></tr></thead><tbody>'+
+    rep.applied.map(r=>`<tr><td>${r.setting}</td><td>${r.was??'—'}</td><td>${r.now}</td></tr>`).join('')+
+    rep.failed.map(r=>`<tr><td>${r.setting}</td><td colspan="2" style="color:var(--danger,#c33);">rejected (${r.error_code??r.error})</td></tr>`).join('')+
+    '</tbody></table>';
+}
 
 async function saveSequence(){
   const name=document.getElementById('seq-name').value.trim();
