@@ -91,6 +91,44 @@ SEQUENCES = [
 ]
 
 
+# Marker in app_settings so the first-run seed happens exactly once per install.
+DEFAULT_SEED_MARKER = "default_sequences_seeded"
+
+
+def seed_default_sequences(force: bool = False, db_path=None) -> dict:
+    """Idempotently ensure the three panel-transcribed sequences exist.
+
+    Called on app startup so a freshly-installed / re-imaged station comes up
+    with CONT TEST / HIGH POT / CONT HIGHPOT already in the dropdown instead of
+    an empty list (the results DB lives in ProgramData and is wiped on re-image).
+
+    Safe by design — it NEVER overwrites or resurrects a sequence an admin has
+    since edited or deleted:
+      * it only *creates* names that are entirely absent, and
+      * it runs only once, guarded by an app_settings marker, so a default the
+        admin later deletes on purpose does not come back on the next restart.
+
+    force=True re-runs the create-if-missing pass regardless of the marker (still
+    never touching sequences that already exist) — handy for tests/recovery.
+    """
+    kw = {} if db_path is None else {"db_path": db_path}
+    if not force and db.get_setting(DEFAULT_SEED_MARKER, **kw) == "1":
+        return {"seeded": False, "created": [], "reason": "already seeded"}
+    existing = {s["name"] for s in db.list_sequences(instrument="hipot",
+                                                     active_only=False, **kw)}
+    created = []
+    for seq in SEQUENCES:
+        if seq["name"] in existing:
+            continue
+        db.create_sequence(seq["name"], seq["steps"],
+                           description=seq["description"],
+                           instrument="hipot",
+                           created_by="default seed (panel transcription)", **kw)
+        created.append(seq["name"])
+    db.set_setting(DEFAULT_SEED_MARKER, "1", **kw)
+    return {"seeded": True, "created": created}
+
+
 def main() -> int:
     replace = "--replace" in sys.argv
     existing = {s["name"]: s for s in db.list_sequences(instrument="hipot",

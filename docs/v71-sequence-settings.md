@@ -175,6 +175,16 @@ This writes all three sequences into the station database, from which they appea
 in the operator dropdown on the HiPot page. The commands generated are verified
 against the V7X manual's configuration field tables by `test_add_commands.py`.
 
+**Automatic first-run seeding.** As of the controller build that added
+`seed_default_sequences()`, the app also seeds these three sequences by itself the
+first time it starts on a fresh install — so a re-imaged station comes up with the
+operator dropdown already populated instead of empty (the results database lives in
+`ProgramData` and does not survive a re-image). The seed is **one-time** (guarded by
+an `app_settings` marker) and only ever *creates* names that are entirely absent, so
+it never overwrites or resurrects a sequence an admin has since edited or deleted.
+Running `import_panel_sequences.py` by hand is still the way to reload or, with
+`--replace`, overwrite them after a change to this record.
+
 To load a sequence into the instrument itself, run it once from the controller —
 the controller programs sequence #0 over the interface at run time. Sequence #0
 is volatile and is lost at power-off; the numbered stores 1–3 on the front panel

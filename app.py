@@ -80,6 +80,7 @@ from test_battery import TestBattery, _load_batteries
 import pvd_test
 import auth
 from auth import admin_required
+import import_panel_sequences  # provides seed_default_sequences() for first-run seeding
 
 # Drivers — loaded lazily so the app starts even without hardware
 try:
@@ -3440,5 +3441,14 @@ window.addEventListener('keydown', e=>{
 # ═══════════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     db.init_db()
+    # First-run seed: make sure the three panel-transcribed sequences exist so a
+    # freshly-imaged station isn't left with an empty sequence dropdown. Idempotent
+    # and one-time-guarded; never blocks startup if it fails.
+    try:
+        _seed = import_panel_sequences.seed_default_sequences()
+        if _seed.get("created"):
+            print(f"Seeded default sequences: {', '.join(_seed['created'])}")
+    except Exception as _seed_err:
+        print(f"Default-sequence seeding skipped: {_seed_err}")
     print("Juniper Test Station starting at http://localhost:5000")
     app.run(host="0.0.0.0", port=5000, debug=False)
