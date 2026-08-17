@@ -1545,6 +1545,19 @@ def api_export_session(session_id):
 def page_landing():
     return render_template_string(_LANDING_HTML)
 
+@app.route("/run")
+def page_run():
+    """
+    Operator run screen.
+
+    Deliberately separate from /hipot. That page is the setup and diagnostic
+    view; this one is the only thing an operator needs and is safe to lock a
+    bench terminal onto. It fits 1920x1080 without scrolling by construction —
+    the layout is a fixed-height flex column, never taller than the viewport.
+    """
+    return render_template_string(_RUN_HTML)
+
+
 @app.route("/hipot")
 def page_hipot():
     return render_template_string(_HIPOT_HTML)
@@ -3089,6 +3102,340 @@ async function toggleOutput(name,state){
 function showMsg(id,txt,type){document.getElementById(id).innerHTML=`<div class="msg ${type}">${txt}</div>`;}
 </script>""")
 
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# OPERATOR RUN SCREEN
+#
+# Standalone by design: no shared header, no nav, no admin affordances. A bench
+# terminal can be locked to /run and the operator cannot reach a setting from
+# here. Fixed-height flex column, so it never scrolls at 1920x1080.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_RUN_HTML = r"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Test Station — Run</title>
+<style>
+/* Operator run screen. Everything is sized in vh/vw off a fixed-height flex
+   column, so the page can never scroll: if content would overflow, the tiles
+   shrink instead. Targeted at 1920x1080 but degrades sensibly. */
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --navy:#132a4a; --navy-2:#0d1f38; --line:#26405f;
+  --muted:#8fa6c2; --text:#eaf1f9;
+  --go:#1f9d55; --go-hi:#25b862; --stop:#c0392b; --stop-hi:#d9503f;
+  --sel:#f0a020;
+}
+html,body{height:100%;overflow:hidden}
+body{
+  background:var(--navy-2); color:var(--text);
+  font-family:'Poppins','Segoe UI',system-ui,sans-serif;
+  height:100vh; display:flex; flex-direction:column;
+  user-select:none; -webkit-user-select:none;
+}
+header{
+  flex:0 0 auto; display:flex; align-items:center; gap:24px;
+  padding:14px 32px; background:var(--navy); border-bottom:2px solid var(--line);
+}
+.brand{font-size:1.5rem;font-weight:700;letter-spacing:.06em}
+.brand small{font-weight:400;color:var(--muted);font-size:.8rem;letter-spacing:.14em;margin-left:10px}
+.spacer{flex:1}
+.pill{
+  font-size:1rem;font-weight:600;padding:8px 18px;border-radius:999px;
+  background:#33241a;color:#ffb454;border:2px solid #7a4d1d;white-space:nowrap;
+}
+.pill.ok{background:#12331f;color:#5fe08d;border-color:#1f6b3c}
+.pill.bad{background:#3a1a16;color:#ff8a7a;border-color:#7d2b21}
+.who{display:flex;align-items:center;gap:10px;font-size:1rem;color:var(--muted)}
+.who b{color:var(--text);font-size:1.15rem}
+.linkish{background:none;border:none;color:var(--muted);font-size:.85rem;
+  text-decoration:underline;cursor:pointer;font-family:inherit}
+
+main{flex:1 1 auto; display:flex; flex-direction:column; padding:22px 32px; gap:18px; min-height:0}
+.label{font-size:.95rem;letter-spacing:.16em;color:var(--muted);font-weight:600}
+
+/* Test tiles ------------------------------------------------------------- */
+#tiles{
+  flex:1 1 auto; min-height:0;
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+  grid-auto-rows:minmax(0,1fr);
+  gap:20px; align-content:center; max-height:100%;
+}
+.tile{
+  display:flex;flex-direction:column;justify-content:center;align-items:center;
+  gap:10px; padding:20px; min-height:0;
+  background:var(--navy); color:var(--text);
+  border:4px solid var(--line); border-radius:16px;
+  font-family:inherit; font-size:2.6rem; font-weight:700; line-height:1.1;
+  text-align:center; cursor:pointer; transition:transform .06s, border-color .12s;
+}
+.tile .sub{font-size:1.05rem;font-weight:400;color:var(--muted);line-height:1.35}
+.tile:active{transform:scale(.985)}
+.tile[aria-pressed="true"]{
+  border-color:var(--sel); background:#1b3358;
+  box-shadow:0 0 0 4px rgba(240,160,32,.22) inset;
+}
+.tile[aria-pressed="true"] .sub{color:#e7c894}
+.tile.empty{font-size:1.4rem;color:var(--muted);border-style:dashed;cursor:default}
+
+/* Bottom bar ------------------------------------------------------------- */
+.bar{flex:0 0 auto;display:flex;gap:20px;align-items:stretch}
+.field{flex:1 1 auto;display:flex;flex-direction:column;gap:6px;min-width:0}
+.field input{
+  font-family:inherit;font-size:2.1rem;font-weight:600;padding:12px 18px;
+  background:#0a1830;color:var(--text);border:3px solid var(--line);border-radius:12px;
+  width:100%;min-width:0;
+}
+.field input:focus{outline:none;border-color:var(--sel)}
+#go{
+  flex:0 0 340px; font-family:inherit; font-size:3.2rem; font-weight:800; letter-spacing:.08em;
+  border:none;border-radius:16px;background:var(--go);color:#fff;cursor:pointer;
+}
+#go:hover:not(:disabled){background:var(--go-hi)}
+#go:disabled{background:#2b3b4d;color:#63788f;cursor:not-allowed}
+#go.stop{background:var(--stop)} #go.stop:hover{background:var(--stop-hi)}
+#hint{flex:0 0 auto;text-align:center;font-size:1rem;color:var(--muted);min-height:1.3em}
+
+/* Overlay ---------------------------------------------------------------- */
+#overlay{
+  position:fixed;inset:0;display:none;flex-direction:column;
+  align-items:center;justify-content:center;gap:22px;z-index:50;text-align:center;padding:40px;
+}
+#overlay.show{display:flex}
+#overlay.running{background:#0d1f38f2}
+#overlay.pass{background:#0c3a20f7}
+#overlay.fail{background:#4a120bf7}
+#ov-title{font-size:9rem;font-weight:800;letter-spacing:.06em;line-height:1}
+#ov-sub{font-size:2rem;font-weight:600}
+#ov-detail{font-size:1.3rem;color:#cfe0f2;max-width:70ch;line-height:1.5}
+#ov-live{display:flex;gap:52px;font-size:1.5rem;color:#cfe0f2}
+#ov-live b{display:block;font-size:3.2rem;color:#fff;font-variant-numeric:tabular-nums}
+#ov-dismiss{
+  font-family:inherit;font-size:1.8rem;font-weight:700;padding:16px 56px;border:none;
+  border-radius:14px;background:#fff;color:#12233d;cursor:pointer;
+}
+.warn{font-size:1.15rem;color:#ffcf8a;border:2px solid #7a4d1d;background:#33241a;
+  padding:12px 22px;border-radius:12px}
+</style></head><body>
+
+<header>
+  <div class="brand">JUNIPER<small>TEST STATION</small></div>
+  <div class="spacer"></div>
+  <div class="who">Operator <b id="who">—</b>
+    <button class="linkish" onclick="changeOperator()">change</button></div>
+  <span class="pill" id="conn">Connecting…</span>
+  <button class="linkish" onclick="location.href='/hipot'">Full view</button>
+</header>
+
+<main>
+  <div class="label">1 — CHOOSE TEST</div>
+  <div id="tiles"></div>
+
+  <div class="label">2 — SCAN OR TYPE SERIAL, THEN PRESS GO</div>
+  <div class="bar">
+    <div class="field">
+      <input id="serial" placeholder="DUT serial" autocomplete="off" spellcheck="false">
+    </div>
+    <button id="go" disabled onclick="onGo()">GO</button>
+  </div>
+  <div id="hint"></div>
+</main>
+
+<div id="overlay">
+  <div id="ov-title"></div>
+  <div id="ov-sub"></div>
+  <div id="ov-live" style="display:none">
+    <div>Volts<b id="lv-v">—</b></div>
+    <div>Amps<b id="lv-a">—</b></div>
+    <div>Ohms<b id="lv-o">—</b></div>
+  </div>
+  <div id="ov-detail"></div>
+  <button id="ov-dismiss" style="display:none" onclick="clearResult()">OK</button>
+</div>
+
+<script>
+let SEQS=[], sel=null, running=false, sessionId=null, poll=null, connected=false;
+
+const $=id=>document.getElementById(id);
+
+/* Operator name persists across runs so it is typed once a shift, not once a
+   unit. Stored locally on this bench terminal only. */
+function operator(){ return localStorage.getItem('jd_operator')||''; }
+function changeOperator(){
+  const v=prompt('Operator name:', operator());
+  if(v===null) return;
+  localStorage.setItem('jd_operator', v.trim());
+  paintOperator(); updateGo();
+}
+function paintOperator(){ $('who').textContent = operator() || '—'; }
+
+async function j(u,o){ try{ return await (await fetch(u,o)).json(); }catch(e){ return {ok:false,error:String(e)}; } }
+
+/* Connection ------------------------------------------------------------- */
+async function ensureConnected(){
+  let s = await j('/api/status');
+  if(!s.hipot_connected){
+    // Operators connect on the saved settings; they cannot change them.
+    await j('/api/instrument/connect',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({instrument:'hipot'})});
+    s = await j('/api/status');
+  }
+  connected = !!s.hipot_connected;
+  const p=$('conn');
+  p.textContent = connected ? 'Tester ready' : 'Tester not connected';
+  p.className = 'pill ' + (connected?'ok':'bad');
+  updateGo();
+}
+
+/* Tests ------------------------------------------------------------------ */
+async function loadTests(){
+  const r = await j('/api/sequences?instrument=hipot');
+  SEQS = (r.sequences||[]).slice().sort((a,b)=>a.id-b.id);
+  const box=$('tiles'); box.innerHTML='';
+  if(!SEQS.length){
+    box.innerHTML='<div class="tile empty">No approved tests have been set up.<br>Ask engineering.</div>';
+    return;
+  }
+  SEQS.forEach(s=>{
+    const b=document.createElement('button');
+    b.className='tile'; b.type='button';
+    b.setAttribute('aria-pressed','false');
+    b.onclick=()=>pick(s.id);
+    b.innerHTML = `<span>${s.name}</span><span class="sub">${describe(s)}</span>`;
+    b.id='tile-'+s.id;
+    box.appendChild(b);
+  });
+}
+function describe(s){
+  return (s.steps||[]).map(st=>{
+    if(st.type==='ACW') return `${st.voltage} V AC`;
+    if(st.type==='DCW') return `${st.voltage} V DC`;
+    if(st.type==='IR')  return `${st.voltage} V insulation`;
+    if(st.type==='GB')  return `${st.current} A bond`;
+    if(st.type==='CONT')return `continuity`;
+    if(st.type==='PAUSE')return 'pause';
+    if(st.type==='HOLD') return 'operator hold';
+    return st.type;
+  }).join('  →  ');
+}
+function pick(id){
+  if(running) return;
+  sel = (sel===id)? null : id;
+  SEQS.forEach(s=>$('tile-'+s.id).setAttribute('aria-pressed', String(s.id===sel)));
+  updateGo(); $('serial').focus();
+}
+
+function updateGo(){
+  const g=$('go');
+  if(running){ g.disabled=false; g.className='stop'; g.textContent='STOP'; $('hint').textContent=''; return; }
+  g.className=''; g.textContent='GO';
+  const why = !connected ? 'Tester is not connected.'
+            : !operator() ? 'Set the operator name first.'
+            : sel===null  ? 'Choose a test above.'
+            : !$('serial').value.trim() ? 'Scan or type the DUT serial.'
+            : '';
+  g.disabled = !!why;
+  $('hint').textContent = why;
+}
+
+/* Run -------------------------------------------------------------------- */
+async function onGo(){
+  if(running){ await j('/api/hipot/abort',{method:'POST'}); return; }
+  const seq = SEQS.find(s=>s.id===sel); if(!seq) return;
+  const serial=$('serial').value.trim();
+
+  running=true; updateGo();
+  showOverlay('running','TESTING', seq.name, 'Stand clear of the fixture.');
+  $('ov-live').style.display='flex';
+
+  const r = await j('/api/hipot/run_sequence',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({sequence_id:seq.id, operator:operator(), serial_number:serial})});
+
+  if(!r.ok){
+    running=false; updateGo();
+    showOverlay('fail','ERROR','Could not start', r.error||'Unknown error');
+    $('ov-live').style.display='none'; $('ov-dismiss').style.display='';
+    return;
+  }
+  sessionId=r.session_id;
+  poll=setInterval(tick,400);
+}
+
+async function tick(){
+  const s = await j('/api/hipot/status');
+  const live = await j('/api/hipot/live');
+  if(live && live.ok){
+    $('lv-v').textContent = fmt(live.volts);
+    $('lv-a').textContent = fmt(live.amps);
+    $('lv-o').textContent = fmt(live.ohms);
+  }
+  if(s && s.connected && !s.running){ finish(); }
+}
+function fmt(v){
+  if(v===null||v===undefined) return '—';
+  const a=Math.abs(v);
+  if(a>=1000) return (v/1000).toFixed(2)+'k';
+  if(a>=1)    return v.toFixed(2);
+  if(a>=1e-3) return (v*1e3).toFixed(1)+'m';
+  if(a>=1e-6) return (v*1e6).toFixed(1)+'µ';
+  return v.toExponential(1);
+}
+
+async function finish(){
+  clearInterval(poll); poll=null; running=false; updateGo();
+  $('ov-live').style.display='none';
+  // Small settle so the monitor thread has written the verdict.
+  await new Promise(r=>setTimeout(r,600));
+  const r = await j('/api/session/'+sessionId);
+  const passed = r.ok && r.session && r.session.passed;
+  const bad = (r.ok ? (r.steps||[]) : []).filter(x=>x.passed===0);
+  const why = bad.length
+    ? bad.map(x=>`Step ${x.step_number} (${x.step_type||''}): ${x.failure_reason||'failed'}`).join(' · ')
+    : '';
+  if(passed){
+    showOverlay('pass','PASS', $('serial').value.trim()||'', 'Remove the unit and continue.');
+  } else {
+    showOverlay('fail','FAIL', $('serial').value.trim()||'',
+      (why||'See the full view for detail.') + '  —  Set this unit aside and tell your supervisor.');
+  }
+  $('ov-dismiss').style.display='';
+}
+
+function showOverlay(kind,title,sub,detail){
+  const o=$('overlay');
+  o.className='show '+kind;
+  $('ov-title').textContent=title; $('ov-sub').textContent=sub||'';
+  $('ov-detail').textContent=detail||''; $('ov-dismiss').style.display='none';
+}
+function clearResult(){
+  $('overlay').className=''; $('serial').value=''; $('serial').focus(); updateGo();
+}
+
+/* Wiring ----------------------------------------------------------------- */
+$('serial').addEventListener('input', updateGo);
+// A barcode scanner ends its scan with Enter. That fills the field and moves
+// focus to GO, but deliberately does NOT start the test — starting 1500 V is
+// always an explicit press.
+$('serial').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); $('go').focus(); }});
+window.addEventListener('keydown', e=>{
+  if(e.key==='Escape' && $('overlay').classList.contains('show') && !running) clearResult();
+});
+
+(async function init(){
+  paintOperator();
+  if(!operator()) changeOperator();
+  await loadTests();
+  await ensureConnected();
+  setInterval(()=>{ if(!running) ensureConnected(); }, 5000);
+  $('serial').focus();
+})();
+</script>
+</body></html>
+"""
 
 # ═══════════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
