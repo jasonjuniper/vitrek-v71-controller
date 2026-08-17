@@ -7,13 +7,28 @@
 # it to ProgramData on first run), plc\rig_config.json (read-only), and the x64 Silicon
 # Labs CP2110 DLLs at the exact relative path v71_driver.py loads them from.
 #
-#   powershell -ExecutionPolicy Bypass -File build-exe.ps1 -Version 1.1.0
-param([string]$Version = "1.1.0")
+#   powershell -ExecutionPolicy Bypass -File build-exe.ps1 -Version 1.1.0 [-Python <path>]
+#
+# -Python lets the automated build host (pc-deploy) point at its own build venv; if omitted,
+# it resolves a sensible local interpreter so the recipe is portable across machines.
+param([string]$Version = "1.1.0", [string]$Python = "")
 
 $ErrorActionPreference = 'Stop'
-$py   = 'C:\Users\ENG2\AppData\Local\Programs\Python\Python313\python.exe'
+if (-not $Python) {
+    $cands = @(
+        'C:\Users\ENG2\AppData\Local\Programs\Python\Python313\python.exe',
+        'C:\build\venv\Scripts\python.exe'
+    )
+    $Python = $cands | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $Python) {
+        $Python = (Get-Command python.exe -ErrorAction SilentlyContinue | Where-Object { $_.Source -notlike '*WindowsApps*' } | Select-Object -First 1).Source
+    }
+}
+if (-not $Python -or -not (Test-Path $Python)) { throw "No Python interpreter found; pass -Python <path to python.exe>" }
+$py   = $Python
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
+Write-Host "Using Python: $py"
 
 $dll = 'software\drivers\USB_DLLs_and_Headers\USB DLLs and Headers\x64'
 
