@@ -1,8 +1,29 @@
 # Open questions on the V71 test sequences (UL context)
 
-**Status:** unresolved questions, not findings. Raised 2026-08-17.
+**Status:** raised 2026-08-17, answered at the ownership level the same day.
 **Raised by:** Claude (Cowork session), during transcription of the front-panel
 sequences into the controller webapp.
+
+## Disposition (2026-08-17)
+
+Jay's response, recorded here so this document is not mistaken for an open
+action list:
+
+- **The test values were set up by an electrical engineer**, not by Jay and not
+  by me. They are not to be changed by either of us.
+- **External equipment is connected to the DUT**, which affects the ground /
+  continuity path. That is the most likely explanation for the 5 kΩ CONT
+  threshold reading oddly in isolation — it is not measuring a bare bonding
+  conductor, and Section 1 below was written without knowledge of the external
+  equipment.
+
+Sections 1–4 are therefore **closed as owned by the responsible engineer**. The
+sequences have been transcribed to software exactly as found on the instrument,
+with no values altered. Sections 5–8 concern process and equipment state rather
+than test values and remain worth a look, but none of them block use.
+
+The value of what remains is as a record of what the settings *are* and why
+someone unfamiliar might misread them — not as a challenge to them.
 
 ## Read this first
 
@@ -42,7 +63,10 @@ START Requires Stop before Start, BEEP On, LOCK Disabled, FREQ 60 Hz,
 
 ## 1. The CONT step, and whether it is standing in for a grounding test
 
-**This is the one I would want answered first.**
+> **Closed.** Set by the responsible electrical engineer, and external equipment
+> is in the measurement path — the step is not measuring a bare bonding
+> conductor, which is the assumption the concern below was built on. Retained
+> for context only.
 
 The V71 CONT step is a low-current continuity measurement. It answers "is there
 a conductive path here." The pass window is currently ≤ 5 kΩ.
@@ -76,6 +100,8 @@ governing standard require, and is a V71 the right instrument for it?
 
 ## 2. ACW at 1500 V for 1 second
 
+> **Closed.** Set by the responsible electrical engineer; values not altered.
+
 1500 V is a common dielectric test voltage. A 1-second dwell is also common —
 but usually as the *production-line* variant of a longer type test, and the
 usual convention is that shortening the dwell comes with **raising** the
@@ -97,6 +123,8 @@ it.
 
 ## 3. "Breakdown Only" means no leakage limit at all
 
+> **Closed.** Set by the responsible electrical engineer; values not altered.
+
 Both ACW steps have MIN and MAX leakage set to NONE. Per the V7X manual, the
 instrument still detects breakdown in that state, so the step is not inert.
 What it does *not* do is apply any numeric window to leakage current.
@@ -109,6 +137,8 @@ does not enforce it.
 this test, and if so should MAX LIMIT be set rather than left at NONE?
 
 ## 4. ARC 20 mA is armed, and it lives outside the sequence
+
+> **Closed.** Set by the responsible electrical engineer; values not altered.
 
 Arc detection is enabled at 20 mA, so arcing above that fails a step. That is a
 real pass/fail criterion applied to every ACW step — but it is stored in the

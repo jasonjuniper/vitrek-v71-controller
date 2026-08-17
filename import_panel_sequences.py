@@ -8,6 +8,20 @@ The V7X protocol is write-only for sequences, so this file IS the backup —
 there is no way to re-read these definitions from the instrument. Treat it as
 the source of truth and keep it in version control.
 
+PROVENANCE — read before editing any value here.
+
+    The test values were set up on the instrument by an electrical engineer.
+    They are transcribed here EXACTLY as found; nothing has been adjusted,
+    rounded, or "corrected". Do not change a number in this file to make a
+    test pass or to match an expectation. Any change to a test value is the
+    responsible engineer's call, gets made on the instrument first, and is
+    then re-transcribed here.
+
+    External equipment is connected to the DUT and sits in the ground /
+    continuity measurement path. Readings therefore reflect the fixture as a
+    whole, not a bare conductor — which is why the CONT threshold looks loose
+    if you evaluate it in isolation. See docs/test-sequence-review-questions.md.
+
 Source screens, field by field:
 
   Sequence #1  "CONT TEST"    (1 step)
@@ -39,8 +53,10 @@ import database as db
 SEQUENCES = [
     {
         "name": "CONT TEST",
-        "description": ("Continuity only. Transcribed from V71 front panel "
-                        "sequence #1 on 2026-08-17. Panel ZERO offset was 0 ohm."),
+        "description": ("Continuity only. Values set by the responsible electrical "
+                        "engineer; transcribed verbatim from V71 front panel "
+                        "sequence #1 on 2026-08-17. Panel ZERO offset was 0 ohm. "
+                        "External equipment is in the measurement path."),
         "steps": [
             {"type": "CONT", "dwell": "5", "max_ohm": "5000"},
         ],
@@ -48,8 +64,10 @@ SEQUENCES = [
     {
         "name": "HIGH POT",
         "description": ("AC withstand only, breakdown detection with no leakage "
-                        "limits. Transcribed from V71 front panel sequence #2 "
-                        "on 2026-08-17."),
+                        "limits (panel LIMITS: Breakdown Only). Values set by "
+                        "the responsible electrical engineer; transcribed "
+                        "verbatim from V71 front panel sequence #2 on "
+                        "2026-08-17. Arc limit 20 mA lives in CONFIG, not here."),
         "steps": [
             # min_leakage and max_leakage omitted = LIMITS: Breakdown Only
             {"type": "ACW", "voltage": "1500", "ramp": "1", "dwell": "1",
@@ -58,9 +76,12 @@ SEQUENCES = [
     },
     {
         "name": "CONT HIGHPOT",
-        "description": ("Continuity then AC withstand. Transcribed from V71 "
-                        "front panel sequence #3 on 2026-08-17. Steps are "
-                        "identical to sequences #1 and #2 run back to back."),
+        "description": ("Continuity then AC withstand. Values set by the "
+                        "responsible electrical engineer; transcribed verbatim "
+                        "from V71 front panel sequence #3 on 2026-08-17. Steps "
+                        "are identical to sequences #1 and #2 back to back; "
+                        "ON FAIL is Stop Running Sequence, so a CONT failure "
+                        "prevents the 1500 V step from running."),
         "steps": [
             {"type": "CONT", "dwell": "5", "max_ohm": "5000"},
             {"type": "ACW", "voltage": "1500", "ramp": "1", "dwell": "1",
